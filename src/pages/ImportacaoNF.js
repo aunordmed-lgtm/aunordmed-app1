@@ -182,6 +182,13 @@ export function ImportacaoNF({ medicos, onRefresh }) {
         if (medicoSelecionado && nova?.id) {
           await supabase.from('comprovantes').insert({ token: uid(), nf_id: nova.id, medico_nome: medicoSelecionado, medico_crm: med?.crm || null, tomador: n.tomador, valor_repasse: n.bruto * (1 - retencao/100), competencia: n.comp, dados_extras: { nf: n.nf, pix: med?.chave_pix } })
         }
+        // Auto-cadastrar tomador se não existir
+        if (n.tomador && n.tomador !== 'Tomador não identificado') {
+          const { data: tomExist } = await supabase.from('tomadores').select('id').eq('nome', n.tomador).single().catch(() => ({ data: null }))
+          if (!tomExist) {
+            await supabase.from('tomadores').insert({ nome: n.tomador, obs: 'Cadastrado automaticamente via importação de NF' }).catch(() => {})
+          }
+        }
         sucesso++
       } catch(e) { falhas++ }
     }

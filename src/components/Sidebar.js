@@ -22,8 +22,9 @@ const navItems = [
   { path: '/medicos', icon: '👨‍⚕️', label: 'Médicos', badge: 'med', badgeColor: 'ok' },
   { path: '/tomadores', icon: '🏥', label: 'Tomadores' },
   { section: 'Relatórios' },
+  { path: '/relatorio-gerencial', icon: '📋', label: 'Gerencial' },
   { path: '/comprovantes', icon: '🧾', label: 'Comprovantes', badge: 'comp', badgeColor: 'ok' },
-  { path: '/relatorios', icon: '📈', label: 'Relatórios' },
+  { path: '/relatorios', icon: '📈', label: 'Por médico' },
   { section: 'Sistema' },
   { path: '/configuracoes', icon: '⚙️', label: 'Configurações' },
 ]

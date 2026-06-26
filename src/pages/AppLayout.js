@@ -36,7 +36,7 @@ export function AppLayout() {
 
   const carregar = useCallback(async () => {
     const [notas, medicos, tomadores, adiantamentos, cashbacks, comprovantes, contas, impostos] = await Promise.all([
-      safeQueryCustom(() => supabase.from('notas_fiscais').select('*').order('criado_em', { ascending: false })),
+      safeQueryCustom(() => supabase.from('notas_fiscais').select('*').order('criado_em', { ascending: false })), 
       safeQueryCustom(() => supabase.from('medicos').select('*').order('nome')),
       safeQueryCustom(() => supabase.from('tomadores').select('*').order('nome')),
       safeQueryCustom(() => supabase.from('adiantamentos').select('*').order('criado_em', { ascending: false })),

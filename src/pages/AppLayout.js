@@ -18,6 +18,7 @@ import { Impostos } from './Impostos'
 import { DRE } from './DRE'
 import { Configuracoes } from './Configuracoes'
 import { ImportacaoNF } from './ImportacaoNF'
+import { ExtratoOFX } from './ExtratoOFX'
 
 async function safeQueryCustom(fn) {
   try {
@@ -36,7 +37,7 @@ export function AppLayout() {
 
   const carregar = useCallback(async () => {
     const [notas, medicos, tomadores, adiantamentos, cashbacks, comprovantes, contas, impostos] = await Promise.all([
-      safeQueryCustom(() => supabase.from('notas_fiscais').select('*').order('criado_em', { ascending: false })), 
+      safeQueryCustom(() => supabase.from('notas_fiscais').select('*').order('criado_em', { ascending: false })),
       safeQueryCustom(() => supabase.from('medicos').select('*').order('nome')),
       safeQueryCustom(() => supabase.from('tomadores').select('*').order('nome')),
       safeQueryCustom(() => supabase.from('adiantamentos').select('*').order('criado_em', { ascending: false })),
@@ -78,6 +79,7 @@ export function AppLayout() {
           <Route path="/" element={<Dashboard {...props} />} />
           <Route path="/notas" element={<Notas {...props} />} />
           <Route path="/importacao" element={<ImportacaoNF {...props} />} />
+          <Route path="/extrato" element={<ExtratoOFX {...props} />} />
           <Route path="/pendencias" element={<Pendencias {...props} />} />
           <Route path="/medicos" element={<Medicos {...props} />} />
           <Route path="/tomadores" element={<Tomadores {...props} />} />

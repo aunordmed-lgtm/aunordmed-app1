@@ -157,10 +157,21 @@ export function ImportacaoNF({ medicos, onRefresh }) {
     const med = medicos.find(m => m.nome === medicoSelecionado)
     const retencao = parseFloat(retencaoCustom) || med?.retencao || 13
     setLoading(true)
-    let sucesso = 0, falhas = 0
+    let sucesso = 0, falhas = 0, duplicadas = 0
+
+    // Buscar NFs já existentes para evitar duplicatas
+    const nfsExistentes = await supabase.from('notas_fiscais').select('nf,comp').then(r => r.data || [])
+    const chaves = new Set(nfsExistentes.map(n => `${n.nf}__${n.comp}`))
+
     for (let i = 0; i < notasSel.length; i++) {
       const n = notasSel[i]
       setProgresso({ atual: i + 1, total: notasSel.length, arquivo: `Salvando nota ${n.nf}...` })
+
+      // Verificar duplicata
+      const chave = `${n.nf}__${n.comp}`
+      if (chaves.has(chave)) { duplicadas++; continue }
+      chaves.add(chave)
+
       try {
         const recebido = n.bruto * 0.9385
         const medicos_nota = medicoSelecionado ? [{ nome: medicoSelecionado, crm: med?.crm || '', valor_bruto_medico: n.bruto, retencao_individual: retencao, repasse: n.bruto * (1 - retencao/100) }] : []
@@ -175,7 +186,7 @@ export function ImportacaoNF({ medicos, onRefresh }) {
       } catch(e) { falhas++ }
     }
     setLoading(false)
-    setResultado({ sucesso, falhas, total: notasSel.length })
+    setResultado({ sucesso, falhas, duplicadas, total: notasSel.length })
     setEtapa('resultado')
     onRefresh()
   }
@@ -335,6 +346,7 @@ export function ImportacaoNF({ medicos, onRefresh }) {
             <div style={{ fontSize: 14, color: 'var(--n4)' }}>
               <span style={{ color: 'var(--g3)', fontWeight: 700 }}>{resultado.sucesso}</span> de <strong>{resultado.total}</strong> nota(s) importada(s) com sucesso
               {resultado.falhas > 0 && <span style={{ color: 'var(--red)', fontWeight: 700 }}> · {resultado.falhas} falha(s)</span>}
+              {resultado.duplicadas > 0 && <span style={{ color: 'var(--orange)', fontWeight: 700 }}> · {resultado.duplicadas} já existiam (ignoradas)</span>}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>

@@ -8,6 +8,7 @@ const navItems = [
   { path: '/', icon: '📊', label: 'Dashboard' },
   { path: '/notas', icon: '📄', label: 'Notas fiscais', badge: 'nf', badgeColor: 'ok' },
   { path: '/importacao', icon: '📥', label: 'Importar NFs' },
+  { path: '/extrato', icon: '🏦', label: 'Extrato OFX' },
   { section: 'Pendências' },
   { path: '/pendencias', icon: '🔔', label: 'Pendências', badge: 'pend' },
   { section: 'Financeiro' },
@@ -52,7 +53,6 @@ export function Sidebar({ badges = {} }) {
           </div>
         </div>
       </div>
-
       <nav style={{ padding: '8px 8px', flex: 1, overflowY: 'auto' }}>
         {navItems.map((item, i) => {
           if (item.section) return <div key={i} className="nav-section">{item.section}</div>
@@ -67,7 +67,6 @@ export function Sidebar({ badges = {} }) {
           )
         })}
       </nav>
-
       <div className="sidebar-bottom">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px' }}>
           <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--g5)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#fff', flexShrink: 0 }}>

@@ -4,50 +4,46 @@ import { useToast } from '../components/Toast'
 import * as XLSX from 'xlsx'
 import { uid, mesAtual } from '../lib/helpers'
 
-// Parser XML NFS-e padrão nacional (gov.br - SPED Fazenda)
+const NS = 'http://www.sped.fazenda.gov.br/nfse'
+
+function getTag(el, tag) {
+  let found = el.getElementsByTagNameNS(NS, tag)
+  if (found.length > 0) return found[0].textContent?.trim() || null
+  found = el.getElementsByTagName(tag)
+  if (found.length > 0) return found[0].textContent?.trim() || null
+  return null
+}
+
+function getTagIn(el, parent, tag) {
+  let pEls = el.getElementsByTagNameNS(NS, parent)
+  if (!pEls.length) pEls = el.getElementsByTagName(parent)
+  if (!pEls.length) return null
+  const p = pEls[0]
+  let found = p.getElementsByTagNameNS(NS, tag)
+  if (!found.length) found = p.getElementsByTagName(tag)
+  return found.length > 0 ? found[0].textContent?.trim() || null : null
+}
+
 function parseXMLNFSe(xmlText) {
   const parser = new DOMParser()
   const doc = parser.parseFromString(xmlText, 'text/xml')
   const notas = []
   const erros = []
 
-  const NS = 'http://www.sped.fazenda.gov.br/nfse'
-
-  const getEl = (el, tag) => {
-    // Tenta com namespace
-    let found = el.getElementsByTagNameNS(NS, tag)
-    if (found.length > 0) return found[0].textContent?.trim() || null
-    // Tenta sem namespace
-    found = el.getElementsByTagName(tag)
-    if (found.length > 0) return found[0].textContent?.trim() || null
-    return null
-  }
-
-  // Buscar elementos infNFSe
   let nfsElements = Array.from(doc.getElementsByTagNameNS(NS, 'infNFSe'))
   if (!nfsElements.length) nfsElements = Array.from(doc.getElementsByTagName('infNFSe'))
   if (!nfsElements.length) nfsElements = [doc.documentElement]
 
   nfsElements.forEach((el, i) => {
     try {
-      // Número da NFS-e
-      const numero = getEl(el, 'nNFSe') || getEl(el, 'nDFSe') || `IMPORT-${i+1}`
+      const numero = getTag(el, 'nNFSe') || getTag(el, 'nDFSe') || `IMPORT-${i+1}`
+      const valorBruto = parseFloat(getTag(el, 'vServ') || getTag(el, 'vBC') || '0')
 
-      // Valor do serviço (bruto)
-      const valorBruto = parseFloat(
-        getEl(el, 'vServ') ||
-        getEl(el, 'vBC') ||
-        getEl(el, 'vLiq') ||
-        '0'
-      )
+      // Tomador: buscar especificamente dentro de <toma>
+      const tomador = getTagIn(el, 'toma', 'xNome') || 'Tomador não identificado'
 
-      // Tomador
-      const tomador = getEl(el, 'xNome') || 'Tomador não identificado'
-
-      // Data de competência
-      const dCompet = getEl(el, 'dCompet') || getEl(el, 'dhEmi') || getEl(el, 'dhProc') || ''
-      let comp = ''
-      let emissao = ''
+      const dCompet = getTag(el, 'dCompet') || getTag(el, 'dhEmi') || ''
+      let comp = '', emissao = ''
       if (dCompet) {
         const d = new Date(dCompet)
         if (!isNaN(d)) {
@@ -56,10 +52,8 @@ function parseXMLNFSe(xmlText) {
         }
       }
 
-      // Valores de impostos
-      const vISSQN = parseFloat(getEl(el, 'vISSQN') || '0')
-      const vLiq = parseFloat(getEl(el, 'vLiq') || '0')
-      const discriminacao = getEl(el, 'xDescServ') || ''
+      const vISSQN = parseFloat(getTag(el, 'vISSQN') || '0')
+      const discriminacao = getTag(el, 'xDescServ') || ''
 
       if (valorBruto > 0) {
         notas.push({
@@ -69,7 +63,6 @@ function parseXMLNFSe(xmlText) {
           emissao,
           bruto: valorBruto,
           iss_retido: vISSQN,
-          valor_liquido_nf: vLiq,
           discriminacao: discriminacao.substring(0, 500),
           status: 'Emitida',
           origem: 'xml'
@@ -83,7 +76,6 @@ function parseXMLNFSe(xmlText) {
   return { notas, erros }
 }
 
-// Parser Excel/CSV
 function parseExcel(file) {
   return new Promise((resolve) => {
     const reader = new FileReader()
@@ -93,16 +85,8 @@ function parseExcel(file) {
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
         if (rows.length < 2) { resolve({ notas: [], erros: ['Arquivo vazio'] }); return }
-
         const header = rows[0].map(h => String(h).toLowerCase().trim())
-        const col = (names) => {
-          for (const n of names) {
-            const idx = header.findIndex(h => h.includes(n))
-            if (idx >= 0) return idx
-          }
-          return -1
-        }
-
+        const col = (names) => { for (const n of names) { const idx = header.findIndex(h => h.includes(n)); if (idx >= 0) return idx } return -1 }
         const cols = {
           nf: col(['número', 'numero', 'nf', 'nota']),
           tomador: col(['tomador', 'cliente', 'razão', 'razao', 'nome']),
@@ -111,10 +95,7 @@ function parseExcel(file) {
           emissao: col(['emissão', 'emissao', 'data', 'dt']),
           status: col(['status', 'situação', 'situacao']),
         }
-
-        const notas = []
-        const erros = []
-
+        const notas = [], erros = []
         rows.slice(1).forEach((row, i) => {
           if (!row.some(c => c !== '')) return
           try {
@@ -139,7 +120,7 @@ function parseExcel(file) {
           } catch (e) { erros.push(`Linha ${i+2}: ${e.message}`) }
         })
         resolve({ notas, erros })
-      } catch (e) { resolve({ notas: [], erros: ['Erro ao ler arquivo: ' + e.message] }) }
+      } catch (e) { resolve({ notas: [], erros: ['Erro: ' + e.message] }) }
     }
     reader.readAsArrayBuffer(file)
   })
@@ -158,17 +139,11 @@ export function ImportacaoNF({ medicos, onRefresh }) {
   const fileRef = useRef()
 
   const processarArquivo = async (file) => {
-    setLoading(true)
-    setErros([])
-    setNotasImportadas([])
+    setLoading(true); setErros([]); setNotasImportadas([])
     try {
-      let res
-      if (file.name.toLowerCase().endsWith('.xml')) {
-        const text = await file.text()
-        res = parseXMLNFSe(text)
-      } else {
-        res = await parseExcel(file)
-      }
+      const res = file.name.toLowerCase().endsWith('.xml')
+        ? parseXMLNFSe(await file.text())
+        : await parseExcel(file)
       if (res.erros.length > 0) setErros(res.erros)
       if (res.notas.length > 0) {
         setNotasImportadas(res.notas)
@@ -178,7 +153,7 @@ export function ImportacaoNF({ medicos, onRefresh }) {
       } else {
         toast('Nenhuma nota encontrada no arquivo.', 'error')
       }
-    } catch (e) { toast('Erro ao processar: ' + e.message, 'error') }
+    } catch (e) { toast('Erro: ' + e.message, 'error') }
     setLoading(false)
   }
 
@@ -189,12 +164,11 @@ export function ImportacaoNF({ medicos, onRefresh }) {
     if (!notasSel.length) { toast('Selecione ao menos uma nota.', 'error'); return }
     const med = medicos.find(m => m.nome === medicoSelecionado)
     const retencao = parseFloat(retencaoCustom) || med?.retencao || 13
-    const imposto = 0.0615
     setLoading(true)
     let sucesso = 0, falhas = 0
     for (const n of notasSel) {
       try {
-        const recebido = n.bruto * (1 - imposto)
+        const recebido = n.bruto * 0.9385
         const medicos_nota = medicoSelecionado ? [{ nome: medicoSelecionado, crm: med?.crm || '', valor_bruto_medico: n.bruto, retencao_individual: retencao, repasse: n.bruto * (1 - retencao/100) }] : []
         const totalRepasse = medicos_nota.reduce((a, m) => a + m.repasse, 0)
         const margem = recebido - totalRepasse
@@ -207,14 +181,14 @@ export function ImportacaoNF({ medicos, onRefresh }) {
       } catch (e) { falhas++ }
     }
     setLoading(false)
-    setResultado({ sucesso, falhas, total: notasSel.length })
+    setResultado({ sucesso, falhas })
     setEtapa('resultado')
     onRefresh()
   }
 
   const reiniciar = () => { setEtapa('upload'); setNotasImportadas([]); setErros([]); setResultado(null); setSelecionadas(new Set()); setMedicoSelecionado(''); setRetencaoCustom('') }
-  const toggleSel = (i) => { setSelecionadas(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n }) }
-  const toggleTodos = () => { if (selecionadas.size === notasImportadas.length) setSelecionadas(new Set()); else setSelecionadas(new Set(notasImportadas.map((_, i) => i))) }
+  const toggleSel = (i) => setSelecionadas(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n })
+  const toggleTodos = () => selecionadas.size === notasImportadas.length ? setSelecionadas(new Set()) : setSelecionadas(new Set(notasImportadas.map((_, i) => i)))
 
   return (
     <div className="page-content">
@@ -224,14 +198,12 @@ export function ImportacaoNF({ medicos, onRefresh }) {
             <div className="card">
               <div className="card-header"><h3>📄 Importar XML — Portal Nacional NFS-e</h3></div>
               <div className="card-body">
-                <p style={{ fontSize: 13, color: 'var(--n4)', marginBottom: 14, lineHeight: 1.6 }}>
-                  Compatível com o padrão <strong>SPED Fazenda (gov.br)</strong> — o mesmo formato dos XMLs da prefeitura de Olinda/PE e demais municípios que usam o portal nacional.
-                </p>
-                <div style={{ border: '2px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: 32, textAlign: 'center', cursor: 'pointer', transition: 'all .2s', background: 'var(--n10)' }}
+                <p style={{ fontSize: 13, color: 'var(--n4)', marginBottom: 14, lineHeight: 1.6 }}>Compatível com o padrão <strong>SPED Fazenda (gov.br)</strong> — prefeitura de Olinda/PE e demais municípios do portal nacional.</p>
+                <div style={{ border: '2px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: 32, textAlign: 'center', cursor: 'pointer', background: 'var(--n10)' }}
                   onClick={() => { fileRef.current.accept='.xml'; fileRef.current.click() }}
-                  onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor='var(--g5)'; e.currentTarget.style.background='var(--g10)' }}
-                  onDragLeave={e => { e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.background='var(--n10)' }}
-                  onDrop={e => { e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.background='var(--n10)'; handleDrop(e) }}>
+                  onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor='var(--g5)' }}
+                  onDragLeave={e => { e.currentTarget.style.borderColor='var(--border)' }}
+                  onDrop={e => { e.currentTarget.style.borderColor='var(--border)'; handleDrop(e) }}>
                   <div style={{ fontSize: 36, marginBottom: 10 }}>🗂️</div>
                   <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--n2)', marginBottom: 4 }}>Arraste o XML aqui</div>
                   <div style={{ fontSize: 12, color: 'var(--n5)' }}>ou clique para selecionar</div>
@@ -239,18 +211,15 @@ export function ImportacaoNF({ medicos, onRefresh }) {
                 </div>
               </div>
             </div>
-
             <div className="card">
               <div className="card-header"><h3>📊 Importar Excel / CSV</h3></div>
               <div className="card-body">
-                <p style={{ fontSize: 13, color: 'var(--n4)', marginBottom: 14, lineHeight: 1.6 }}>
-                  Importe planilhas com colunas de <strong>número, tomador, valor, competência</strong> e data de emissão. O sistema detecta os campos automaticamente.
-                </p>
-                <div style={{ border: '2px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: 32, textAlign: 'center', cursor: 'pointer', transition: 'all .2s', background: 'var(--n10)' }}
+                <p style={{ fontSize: 13, color: 'var(--n4)', marginBottom: 14, lineHeight: 1.6 }}>Planilhas com colunas de <strong>número, tomador, valor, competência</strong>. O sistema detecta automaticamente.</p>
+                <div style={{ border: '2px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: 32, textAlign: 'center', cursor: 'pointer', background: 'var(--n10)' }}
                   onClick={() => { fileRef.current.accept='.xlsx,.xls,.csv'; fileRef.current.click() }}
-                  onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor='var(--blue)'; e.currentTarget.style.background='var(--blue-l)' }}
-                  onDragLeave={e => { e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.background='var(--n10)' }}
-                  onDrop={e => { e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.background='var(--n10)'; handleDrop(e) }}>
+                  onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor='var(--blue)' }}
+                  onDragLeave={e => { e.currentTarget.style.borderColor='var(--border)' }}
+                  onDrop={e => { e.currentTarget.style.borderColor='var(--border)'; handleDrop(e) }}>
                   <div style={{ fontSize: 36, marginBottom: 10 }}>📈</div>
                   <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--n2)', marginBottom: 4 }}>Arraste o Excel aqui</div>
                   <div style={{ fontSize: 12, color: 'var(--n5)' }}>ou clique para selecionar</div>
@@ -261,34 +230,15 @@ export function ImportacaoNF({ medicos, onRefresh }) {
               </div>
             </div>
           </div>
-
           <div className="card">
-            <div className="card-header"><h3>📋 Modelo de planilha Excel</h3></div>
+            <div className="card-header"><h3>📋 Modelo Excel</h3></div>
             <div className="card-body">
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead><tr style={{ background: 'var(--g1)' }}>
-                    {['Número','Tomador','Valor','Competência','Emissão','Status'].map(h => (
-                      <th key={h} style={{ padding: '8px 12px', color: 'var(--g8)', fontSize: 10, fontWeight: 700, textAlign: 'left', letterSpacing: .5 }}>{h}</th>
-                    ))}
-                  </tr></thead>
-                  <tbody><tr style={{ background: 'var(--n10)' }}>
-                    {['00001','Unimed Sergipe','1200,00','05/2026','15/05/2026','Emitida'].map((v,i) => (
-                      <td key={i} style={{ padding: '8px 12px', color: 'var(--n4)', fontFamily: 'var(--mono)', fontSize: 11 }}>{v}</td>
-                    ))}
-                  </tr></tbody>
-                </table>
-              </div>
-              <button className="btn btn-outline btn-sm" style={{ marginTop: 12 }} onClick={() => {
+              <button className="btn btn-outline btn-sm" onClick={() => {
                 const ws = XLSX.utils.aoa_to_sheet([['Número','Tomador','Valor','Competência','Emissão','Status'],['00001','Unimed Sergipe','1200,00','05/2026','15/05/2026','Emitida']])
-                const wb = XLSX.utils.book_new()
-                XLSX.utils.book_append_sheet(wb, ws, 'Modelo')
-                XLSX.writeFile(wb, 'modelo_importacao_nf.xlsx')
-                toast('Modelo baixado!')
+                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Modelo'); XLSX.writeFile(wb, 'modelo_importacao_nf.xlsx'); toast('Modelo baixado!')
               }}>⬇ Baixar modelo Excel</button>
             </div>
           </div>
-
           <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={e => { if(e.target.files[0]) processarArquivo(e.target.files[0]) }} />
           {loading && <div className="loading-full"><div className="spinner spinner-lg"/><span>Processando arquivo...</span></div>}
         </>
@@ -296,12 +246,12 @@ export function ImportacaoNF({ medicos, onRefresh }) {
 
       {etapa === 'preview' && (
         <>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
             <div className="card" style={{ flex: 1, minWidth: 280 }}>
               <div className="card-header"><h3>👨‍⚕️ Vincular médico (opcional)</h3></div>
               <div className="card-body">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <div className="field"><label>Médico responsável</label>
+                  <div className="field"><label>Médico</label>
                     <select value={medicoSelecionado} onChange={e => setMedicoSelecionado(e.target.value)}>
                       <option value="">— sem vínculo —</option>
                       {medicos.map(m => <option key={m.id} value={m.nome}>{m.nome}</option>)}
@@ -320,19 +270,13 @@ export function ImportacaoNF({ medicos, onRefresh }) {
               <div className="kpi-sub">{selecionadas.size} selecionadas</div>
             </div>
           </div>
-
-          {erros.length > 0 && (
-            <div style={{ background: 'var(--yellow-l)', border: '1px solid #FDE68A', borderRadius: 'var(--radius-lg)', padding: '12px 16px', marginBottom: 12, fontSize: 12, color: 'var(--yellow)' }}>
-              ⚠️ {erros.length} aviso(s): {erros.slice(0,3).join(' | ')}
-            </div>
-          )}
-
+          {erros.length > 0 && <div style={{ background: 'var(--yellow-l)', border: '1px solid #FDE68A', borderRadius: 'var(--radius-lg)', padding: '12px 16px', marginBottom: 12, fontSize: 12, color: 'var(--yellow)' }}>⚠️ {erros.slice(0,3).join(' | ')}</div>}
           <div className="card">
             <div className="table-toolbar">
               <span className="table-title">Notas para importar</span>
               <button className="btn btn-ghost btn-sm" onClick={toggleTodos}>{selecionadas.size === notasImportadas.length ? 'Desmarcar todas' : 'Selecionar todas'}</button>
               <button className="btn btn-ghost btn-sm" onClick={reiniciar}>← Voltar</button>
-              <button className="btn btn-primary btn-sm" onClick={importar} disabled={loading || selecionadas.size === 0}>
+              <button className="btn btn-primary btn-sm" onClick={importar} disabled={loading || !selecionadas.size}>
                 {loading ? <><span className="spinner spinner-sm"/> Importando…</> : `✓ Importar ${selecionadas.size} nota(s)`}
               </button>
             </div>
@@ -342,20 +286,18 @@ export function ImportacaoNF({ medicos, onRefresh }) {
                   <th><input type="checkbox" checked={selecionadas.size===notasImportadas.length} onChange={toggleTodos}/></th>
                   <th>Nº NF</th><th>Tomador</th><th>Competência</th><th>Emissão</th><th>Valor bruto</th><th>Status</th><th>Origem</th>
                 </tr></thead>
-                <tbody>
-                  {notasImportadas.map((n, i) => (
-                    <tr key={i} style={{ opacity: selecionadas.has(i) ? 1 : .45 }}>
-                      <td><input type="checkbox" checked={selecionadas.has(i)} onChange={() => toggleSel(i)}/></td>
-                      <td className="mono" style={{ fontWeight: 600 }}>{n.nf}</td>
-                      <td>{n.tomador}</td>
-                      <td className="mono">{n.comp || '—'}</td>
-                      <td className="mono">{n.emissao || '—'}</td>
-                      <td className="mono" style={{ fontWeight: 700, color: 'var(--g3)' }}>{Number(n.bruto).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
-                      <td><span className="badge badge-emit">{n.status}</span></td>
-                      <td><span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 99, background: n.origem==='xml'?'#EFF6FF':'#F0FDF4', color: n.origem==='xml'?'#2563EB':'#15803D', border: `1px solid ${n.origem==='xml'?'#BFDBFE':'#BBF7D0'}`, fontWeight: 700 }}>{n.origem?.toUpperCase()}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
+                <tbody>{notasImportadas.map((n, i) => (
+                  <tr key={i} style={{ opacity: selecionadas.has(i) ? 1 : .45 }}>
+                    <td><input type="checkbox" checked={selecionadas.has(i)} onChange={() => toggleSel(i)}/></td>
+                    <td className="mono" style={{ fontWeight: 600 }}>{n.nf}</td>
+                    <td>{n.tomador}</td>
+                    <td className="mono">{n.comp || '—'}</td>
+                    <td className="mono">{n.emissao || '—'}</td>
+                    <td className="mono" style={{ fontWeight: 700, color: 'var(--g3)' }}>{Number(n.bruto).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
+                    <td><span className="badge badge-emit">{n.status}</span></td>
+                    <td><span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 99, background: n.origem==='xml'?'#EFF6FF':'#F0FDF4', color: n.origem==='xml'?'#2563EB':'#15803D', border: `1px solid ${n.origem==='xml'?'#BFDBFE':'#BBF7D0'}`, fontWeight: 700 }}>{n.origem?.toUpperCase()}</span></td>
+                  </tr>
+                ))}</tbody>
               </table>
             </div>
           </div>
@@ -368,7 +310,7 @@ export function ImportacaoNF({ medicos, onRefresh }) {
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--n1)', marginBottom: 8 }}>Importação concluída!</div>
             <div style={{ fontSize: 14, color: 'var(--n4)' }}>
-              <span style={{ color: 'var(--g3)', fontWeight: 700 }}>{resultado.sucesso}</span> nota(s) importada(s) com sucesso
+              <span style={{ color: 'var(--g3)', fontWeight: 700 }}>{resultado.sucesso}</span> nota(s) importada(s)
               {resultado.falhas > 0 && <span style={{ color: 'var(--red)', fontWeight: 700 }}> · {resultado.falhas} falha(s)</span>}
             </div>
           </div>

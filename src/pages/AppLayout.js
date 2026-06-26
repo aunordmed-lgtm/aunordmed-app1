@@ -11,19 +11,13 @@ import { Adiantamentos } from './Adiantamentos'
 import { Cashback } from './Cashback'
 import { Comprovantes } from './Comprovantes'
 import { Relatorios } from './Relatorios'
+import { RelatorioGerencial } from './RelatorioGerencial'
 import { FluxoCaixa } from './FluxoCaixa'
 import { Contas } from './Contas'
 import { Impostos } from './Impostos'
 import { DRE } from './DRE'
 import { Configuracoes } from './Configuracoes'
-
-async function safeQuery(table, query = '') {
-  try {
-    const { data, error } = await supabase.from(table).select('*').order('criado_em', { ascending: false })
-    if (error) return []
-    return data || []
-  } catch { return [] }
-}
+import { ImportacaoNF } from './ImportacaoNF'
 
 async function safeQueryCustom(fn) {
   try {
@@ -83,6 +77,7 @@ export function AppLayout() {
         <Routes>
           <Route path="/" element={<Dashboard {...props} />} />
           <Route path="/notas" element={<Notas {...props} />} />
+          <Route path="/importacao" element={<ImportacaoNF {...props} />} />
           <Route path="/pendencias" element={<Pendencias {...props} />} />
           <Route path="/medicos" element={<Medicos {...props} />} />
           <Route path="/tomadores" element={<Tomadores {...props} />} />
@@ -90,6 +85,7 @@ export function AppLayout() {
           <Route path="/cashback" element={<Cashback {...props} />} />
           <Route path="/comprovantes" element={<Comprovantes {...props} />} />
           <Route path="/relatorios" element={<Relatorios {...props} />} />
+          <Route path="/relatorio-gerencial" element={<RelatorioGerencial {...props} />} />
           <Route path="/fluxo-caixa" element={<FluxoCaixa {...props} />} />
           <Route path="/contas" element={<Contas {...props} />} />
           <Route path="/impostos" element={<Impostos {...props} />} />

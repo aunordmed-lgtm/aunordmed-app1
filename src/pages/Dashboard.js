@@ -1,6 +1,17 @@
 import { useMemo } from 'react'
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { brl, pct, fmtMes } from '../lib/helpers'
+
+const MESES_ORDER = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+
+function ordenarMeses(dados) {
+  return dados.sort((a, b) => {
+    const [moA, yA] = a.name.split('/')
+    const [moB, yB] = b.name.split('/')
+    if (yA !== yB) return parseInt(yA) - parseInt(yB)
+    return MESES_ORDER.indexOf(moA) - MESES_ORDER.indexOf(moB)
+  })
+}
 
 export function Dashboard({ notas, medicos, adiantamentos, cashbacks, contas }) {
   const totais = useMemo(() => notas.reduce((a, n) => ({
@@ -22,7 +33,7 @@ export function Dashboard({ notas, medicos, adiantamentos, cashbacks, contas }) 
       m[k].repasse += n.total_repasse || 0
       m[k].margem += n.margem || 0
     })
-    return Object.values(m).sort((a, b) => a.name.localeCompare(b.name))
+    return ordenarMeses(Object.values(m))
   }, [notas])
 
   const emitidas = notas.filter(n => n.status === 'Emitida')
@@ -32,22 +43,16 @@ export function Dashboard({ notas, medicos, adiantamentos, cashbacks, contas }) 
   const cbPend = cashbacks.filter(c => c.status === 'pendente').reduce((s, c) => s + c.valor, 0)
   const contasVenc = contas?.filter(c => c.status === 'pendente' && c.vencimento <= new Date().toISOString().split('T')[0]).length || 0
 
-  const pizzaData = [
-    { name: 'Repasse médicos', value: Math.round(totais.repasse), color: '#94A3B8' },
-    { name: 'Margem empresa', value: Math.round(totais.margem), color: '#22994D' },
-    { name: 'Impostos', value: Math.round(totais.bruto * 0.0615), color: '#1A56DB' },
-  ]
-
   return (
     <div className="page-content">
       {/* KPIs */}
       <div className="kpi-grid">
         {[
-          { bar: '#22994D', ic: '#E8F5ED', icon: '💰', label: 'Total emitido', value: brl(totais.bruto), sub: `${notas.length} nota(s)` },
-          { bar: '#1A56DB', ic: '#EBF5FF', icon: '📥', label: 'Total recebido', value: brl(totais.recebido), sub: 'Após impostos' },
-          { bar: '#D97706', ic: '#FFFBEB', icon: '👨‍⚕️', label: 'Total repassado', value: brl(totais.repasse), sub: 'Repasse médicos' },
-          { bar: '#22994D', ic: '#F0FFF6', icon: '📈', label: 'Margem empresa', value: brl(totais.margem), sub: pct(pm) + ' sobre recebido' },
-          { bar: '#D97706', ic: '#FFFBEB', icon: '💵', label: 'Adiantamentos', value: brl(adtPend), sub: 'Pendentes' },
+          { bar: '#22C55E', ic: '#F0FDF4', icon: '💰', label: 'Total emitido', value: brl(totais.bruto), sub: `${notas.length} nota(s)` },
+          { bar: '#2563EB', ic: '#EFF6FF', icon: '📥', label: 'Total recebido', value: brl(totais.recebido), sub: 'Após impostos' },
+          { bar: '#EA580C', ic: '#FFF7ED', icon: '👨‍⚕️', label: 'Total repassado', value: brl(totais.repasse), sub: 'Repasse médicos' },
+          { bar: '#22C55E', ic: '#F0FFF4', icon: '📈', label: 'Margem empresa', value: brl(totais.margem), sub: pct(pm) + ' sobre recebido' },
+          { bar: '#EA580C', ic: '#FFF7ED', icon: '💵', label: 'Adiantamentos', value: brl(adtPend), sub: 'Pendentes' },
           { bar: '#7C3AED', ic: '#F5F3FF', icon: '🎁', label: 'Cashback', value: brl(cbPend), sub: 'Pendentes' },
         ].map((k, i) => (
           <div key={i} className="kpi">
@@ -76,24 +81,24 @@ export function Dashboard({ notas, medicos, adiantamentos, cashbacks, contas }) 
 
       {contasVenc > 0 && (
         <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 'var(--radius-lg)', padding: '12px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: '#B91C1C' }}>
-          ⚠️ <strong>{contasVenc}</strong> conta(s) vencida(s) ou a vencer hoje. Verifique em <strong>Contas</strong>.
+          ⚠️ <strong>{contasVenc}</strong> conta(s) vencida(s) ou a vencer hoje!
         </div>
       )}
 
       {/* Gráficos */}
       <div className="charts-grid">
         <div className="card">
-          <div className="card-header"><h3>📊 Bruto × Recebido × Repasse</h3></div>
+          <div className="card-header"><h3>📊 Bruto × Recebido × Repasse por mês</h3></div>
           <div className="card-body">
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={byComp}>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={byComp} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fontFamily: 'Inter' }} />
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 10, fontFamily: 'JetBrains Mono' }} tickFormatter={v => 'R$' + (v/1000).toFixed(0) + 'k'} />
                 <Tooltip formatter={v => brl(v)} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="bruto" name="Bruto" fill="#145C30" radius={[3,3,0,0]} />
-                <Bar dataKey="recebido" name="Recebido" fill="#22994D" radius={[3,3,0,0]} />
+                <Bar dataKey="bruto" name="Bruto" fill="#14532D" radius={[3,3,0,0]} />
+                <Bar dataKey="recebido" name="Recebido" fill="#16A34A" radius={[3,3,0,0]} />
                 <Bar dataKey="repasse" name="Repasse" fill="#94A3B8" radius={[3,3,0,0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -101,35 +106,61 @@ export function Dashboard({ notas, medicos, adiantamentos, cashbacks, contas }) 
         </div>
 
         <div className="card">
-          <div className="card-header"><h3>🥧 Composição do valor bruto</h3></div>
+          <div className="card-header"><h3>📈 Evolução da margem por mês</h3></div>
           <div className="card-body">
-            <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
-                <Pie data={pizzaData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} dataKey="value">
-                  {pizzaData.map((e, i) => <Cell key={i} fill={e.color} />)}
-                </Pie>
-                <Tooltip formatter={v => brl(v)} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="card chart-full">
-          <div className="card-header"><h3>📈 Evolução da margem</h3></div>
-          <div className="card-body">
-            <ResponsiveContainer width="100%" height={150}>
-              <LineChart data={byComp}>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={byComp} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 10, fontFamily: 'JetBrains Mono' }} tickFormatter={v => 'R$' + (v/1000).toFixed(1) + 'k'} />
                 <Tooltip formatter={v => brl(v)} />
-                <Line type="monotone" dataKey="margem" name="Margem" stroke="#22994D" strokeWidth={2.5} dot={{ fill: '#22994D', r: 4 }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line type="monotone" dataKey="margem" name="Margem" stroke="#16A34A" strokeWidth={2.5} dot={{ fill: '#16A34A', r: 4 }} />
+                <Line type="monotone" dataKey="recebido" name="Recebido" stroke="#2563EB" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
       </div>
+
+      {/* Tabela resumo por mês */}
+      {byComp.length > 0 && (
+        <div className="card">
+          <div className="card-header"><h3>📅 Resumo mensal em ordem cronológica</h3></div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Competência</th>
+                <th style={{textAlign:'right'}}>Bruto</th>
+                <th style={{textAlign:'right'}}>Recebido</th>
+                <th style={{textAlign:'right'}}>Repasse</th>
+                <th style={{textAlign:'right'}}>Margem</th>
+                <th style={{textAlign:'right'}}>% Margem</th>
+              </tr></thead>
+              <tbody>
+                {byComp.map((m, i) => (
+                  <tr key={i} style={{ background: i%2===0?'#fff':'var(--n10)' }}>
+                    <td style={{ fontWeight: 600 }}>{m.name}</td>
+                    <td className="mono" style={{ textAlign:'right', fontWeight:600 }}>{brl(m.bruto)}</td>
+                    <td className="mono" style={{ textAlign:'right', color:'var(--blue)' }}>{brl(m.recebido)}</td>
+                    <td className="mono" style={{ textAlign:'right', color:'var(--n4)' }}>{brl(m.repasse)}</td>
+                    <td className="mono" style={{ textAlign:'right', color:'var(--g3)', fontWeight:700 }}>{brl(m.margem)}</td>
+                    <td className="mono" style={{ textAlign:'right' }}>{m.recebido>0?pct(m.margem/m.recebido):'—'}</td>
+                  </tr>
+                ))}
+                <tr style={{ background:'var(--g1)' }}>
+                  <td style={{ fontWeight:700, color:'#fff', fontSize:12 }}>TOTAL</td>
+                  <td className="mono" style={{ textAlign:'right', fontWeight:700, color:'rgba(255,255,255,.85)' }}>{brl(totais.bruto)}</td>
+                  <td className="mono" style={{ textAlign:'right', fontWeight:700, color:'rgba(255,255,255,.85)' }}>{brl(totais.recebido)}</td>
+                  <td className="mono" style={{ textAlign:'right', fontWeight:700, color:'rgba(255,255,255,.85)' }}>{brl(totais.repasse)}</td>
+                  <td className="mono" style={{ textAlign:'right', fontWeight:700, color:'var(--g7)' }}>{brl(totais.margem)}</td>
+                  <td className="mono" style={{ textAlign:'right', fontWeight:700, color:'var(--g7)' }}>{pct(pm)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

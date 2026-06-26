@@ -17,6 +17,22 @@ import { Impostos } from './Impostos'
 import { DRE } from './DRE'
 import { Configuracoes } from './Configuracoes'
 
+async function safeQuery(table, query = '') {
+  try {
+    const { data, error } = await supabase.from(table).select('*').order('criado_em', { ascending: false })
+    if (error) return []
+    return data || []
+  } catch { return [] }
+}
+
+async function safeQueryCustom(fn) {
+  try {
+    const { data, error } = await fn()
+    if (error) return []
+    return data || []
+  } catch { return [] }
+}
+
 export function AppLayout() {
   const [data, setData] = useState({
     notas: [], medicos: [], tomadores: [], adiantamentos: [],
@@ -25,39 +41,17 @@ export function AppLayout() {
   const [loading, setLoading] = useState(true)
 
   const carregar = useCallback(async () => {
-    try {
-      const [
-        { data: notas },
-        { data: medicos },
-        { data: tomadores },
-        { data: adiantamentos },
-        { data: cashbacks },
-        { data: comprovantes },
-        { data: contas },
-        { data: impostos },
-      ] = await Promise.all([
-        supabase.from('notas_fiscais').select('*').order('criado_em', { ascending: false }),
-        supabase.from('medicos').select('*').order('nome'),
-        supabase.from('tomadores').select('*').order('nome').catch(() => ({ data: [] })),
-        supabase.from('adiantamentos').select('*').order('criado_em', { ascending: false }),
-        supabase.from('cashback').select('*').order('criado_em', { ascending: false }),
-        supabase.from('comprovantes').select('*').order('criado_em', { ascending: false }),
-        supabase.from('contas_pagar_receber').select('*').order('vencimento').catch(() => ({ data: [] })),
-        supabase.from('impostos').select('*').order('competencia', { ascending: false }).catch(() => ({ data: [] })),
-      ])
-      setData({
-        notas: notas || [],
-        medicos: medicos || [],
-        tomadores: tomadores || [],
-        adiantamentos: adiantamentos || [],
-        cashbacks: cashbacks || [],
-        comprovantes: comprovantes || [],
-        contas: contas || [],
-        impostos: impostos || [],
-      })
-    } catch (e) {
-      console.error(e)
-    }
+    const [notas, medicos, tomadores, adiantamentos, cashbacks, comprovantes, contas, impostos] = await Promise.all([
+      safeQueryCustom(() => supabase.from('notas_fiscais').select('*').order('criado_em', { ascending: false })),
+      safeQueryCustom(() => supabase.from('medicos').select('*').order('nome')),
+      safeQueryCustom(() => supabase.from('tomadores').select('*').order('nome')),
+      safeQueryCustom(() => supabase.from('adiantamentos').select('*').order('criado_em', { ascending: false })),
+      safeQueryCustom(() => supabase.from('cashback').select('*').order('criado_em', { ascending: false })),
+      safeQueryCustom(() => supabase.from('comprovantes').select('*').order('criado_em', { ascending: false })),
+      safeQueryCustom(() => supabase.from('contas_pagar_receber').select('*').order('vencimento')),
+      safeQueryCustom(() => supabase.from('impostos').select('*').order('competencia', { ascending: false })),
+    ])
+    setData({ notas, medicos, tomadores, adiantamentos, cashbacks, comprovantes, contas, impostos })
     setLoading(false)
   }, [])
 

@@ -9,6 +9,7 @@ const navItems = [
   { path: '/notas', icon: '📄', label: 'Notas fiscais', badge: 'nf', badgeColor: 'ok' },
   { path: '/importacao', icon: '📥', label: 'Importar NFs' },
   { path: '/extrato', icon: '🏦', label: 'Extrato OFX' },
+  { path: '/conferencia-pdf', icon: '📋', label: 'Conferência PDF' },
   { section: 'Pendências' },
   { path: '/pendencias', icon: '🔔', label: 'Pendências', badge: 'pend' },
   { section: 'Financeiro' },

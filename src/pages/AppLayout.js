@@ -19,6 +19,7 @@ import { DRE } from './DRE'
 import { Configuracoes } from './Configuracoes'
 import { ImportacaoNF } from './ImportacaoNF'
 import { ExtratoOFX } from './ExtratoOFX'
+import { ConferenciaPDF } from './ConferenciaPDF'
 
 async function safeQueryCustom(fn) {
   try {
@@ -93,6 +94,7 @@ export function AppLayout() {
           <Route path="/impostos" element={<Impostos {...props} />} />
           <Route path="/dre" element={<DRE {...props} />} />
           <Route path="/configuracoes" element={<Configuracoes {...props} />} />
+          <Route path="/conferencia-pdf" element={<ConferenciaPDF {...props} />} />
         </Routes>
       </div>
     </div>

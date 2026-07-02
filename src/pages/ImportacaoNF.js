@@ -144,7 +144,7 @@ export function ImportacaoNF({ medicos, onRefresh }) {
       setEtapa('preview')
       toast(`${todasNotas.length} nota(s) encontrada(s) em ${files.length} arquivo(s)!`)
     } else {
-      toast('Nenhuma nota encontrada nos arquivos.', 'error')
+      toast('Nenhuma nota encontrada nos arquivos. Verifique se os XMLs não estão todos cancelados.', 'error')
     }
   }
 

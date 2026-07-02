@@ -110,16 +110,17 @@ export function Notas({ notas, medicos, onRefresh }) {
 
   const salvar = async () => {
     if (!form.nf || !form.tomador || !form.bruto) { toast('Preencha NF, tomador e valor bruto.', 'error'); return }
-    if (!medSel.length) { toast('Adicione ao menos um médico.', 'error'); return }
-    const soma = medSel.reduce((a, m) => a + (parseFloat(m.valor) || 0), 0)
-    if (Math.abs(soma - parseFloat(form.bruto)) > 0.01) { toast('Soma dos valores deve ser igual ao bruto.', 'error'); return }
+    if (medSel.length > 0) {
+      const soma = medSel.reduce((a, m) => a + (parseFloat(m.valor) || 0), 0)
+      if (Math.abs(soma - parseFloat(form.bruto)) > 0.01) { toast('Soma dos valores deve ser igual ao bruto.', 'error'); return }
+    }
     const calc = calcNota(form.bruto, medSel)
-    const medicos_nota = medSel.map(ms => ({
+    const medicos_nota = medSel.length ? medSel.map(ms => ({
       nome: ms.nome, crm: ms.crm || '',
       valor_bruto_medico: parseFloat(ms.valor) || 0,
       retencao_individual: parseFloat(ms.ret) || 13,
       repasse: parseFloat(ms.valor || 0) * (1 - parseFloat(ms.ret || 13) / 100)
-    }))
+    })) : []
     const payload = { ...form, bruto: calc.bruto, recebido: calc.recebido, total_repasse: calc.totalRepasse, margem: calc.margem, pct_margem: calc.pct_margem, medicos_nota, nomes_medicos: medSel.map(m => m.nome).join(', ') }
     setLoading(true)
     try {
@@ -445,7 +446,7 @@ export function Notas({ notas, medicos, onRefresh }) {
               </div>
             </div>
             {medSel.length > 0 && form.bruto && Math.abs(medSel.reduce((a,m)=>a+(parseFloat(m.valor)||0),0) - parseFloat(form.bruto)) > 0.01 && (
-              <div className="pct-warn">⚠️ Soma dos valores deve ser igual ao valor bruto total</div>
+              <div className="pct-warn">⚠️ Soma dos valores dos médicos deve ser igual ao valor bruto total</div>
             )}
           </div>
         </div>

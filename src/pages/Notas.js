@@ -235,10 +235,30 @@ export function Notas({ notas, medicos, onRefresh }) {
               ))}
             </div>
             <div className="med-picker-add">
-              <select style={{ height: 32, fontSize: 12, width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '0 8px', background: 'var(--gray7)' }} onChange={adicionarMed} defaultValue="">
-                <option value="">+ Adicionar médico à nota…</option>
-                {medicos.map(m => <option key={m.id} value={m.nome}>{m.nome}{m.crm ? ` (${m.crm})` : ''}</option>)}
-              </select>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  type="text"
+                  list="med-list"
+                  placeholder="🔍 Digite o nome do médico..."
+                  id="med-input"
+                  style={{ height: 32, fontSize: 12, width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '0 10px', background: 'var(--gray7)', fontFamily: 'var(--sans)' }}
+                  onChange={e => {
+                    const nome = e.target.value
+                    const med = medicos.find(m => m.nome === nome)
+                    if (med) {
+                      if (medSel.find(m => m.nome === nome)) { toast('Médico já adicionado.', 'error'); e.target.value = ''; return }
+                      setMedSel(prev => [...prev, { nome, crm: med?.crm || '', ret: med?.retencao || 13, valor: '' }])
+                      e.target.value = ''
+                      document.getElementById('med-input').value = ''
+                    }
+                  }}
+                />
+                <datalist id="med-list">
+                  {[...medicos].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')).map(m => (
+                    <option key={m.id} value={m.nome}>{m.crm ? `${m.nome} (${m.crm})` : m.nome}</option>
+                  ))}
+                </datalist>
+              </div>
             </div>
             {medSel.length > 0 && form.bruto && Math.abs(medSel.reduce((a,m)=>a+(parseFloat(m.valor)||0),0) - parseFloat(form.bruto)) > 0.01 && (
               <div className="pct-warn">⚠️ Soma dos valores deve ser igual ao valor bruto total</div>

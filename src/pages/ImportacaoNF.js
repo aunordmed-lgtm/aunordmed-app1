@@ -336,7 +336,7 @@ export function ImportacaoNF({ medicos, onRefresh }) {
                     <td className="mono">{n.emissao || '—'}</td>
                     <td className="mono" style={{ fontWeight: 700, color: 'var(--g3)' }}>{Number(n.bruto).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
                     <td><span className="badge badge-emit">{n.status}</span></td>
-                    <td><span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 99, background: n.origem==='xml'?'#EFF6FF':'#F0FDF4', color: n.origem==='xml'?'#2563EB':'#15803D', border: `1px solid ${n.origem==='xml'?'#BFDBFE':'#BBF7D0'}`, fontWeight: 700 }}>{n.origem?.toUpperCase()}</span></td>
+                    <td><span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 99, background: n.origem==='xml'?'#EFF6FF':n.origem==='xml-olinda'?'#FFF7ED':'#F0FDF4', color: n.origem==='xml'?'#2563EB':n.origem==='xml-olinda'?'#C2410C':'#15803D', border: `1px solid ${n.origem==='xml'?'#BFDBFE':n.origem==='xml-olinda'?'#FED7AA':'#BBF7D0'}`, fontWeight: 700 }}>{n.origem==='xml-olinda'?'OLINDA':n.origem?.toUpperCase()}</span></td>
                   </tr>
                 ))}</tbody>
               </table>

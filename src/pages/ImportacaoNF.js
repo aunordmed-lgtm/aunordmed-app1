@@ -127,7 +127,7 @@ export function ImportacaoNF({ medicos, onRefresh }) {
       setProgresso({ atual: i + 1, total: files.length, arquivo: file.name })
       try {
         let notas = []
-        if (file.name.toLowerCase().endsWith('.xml')) {
+        if (file.name.toLowerCase().endsWith('.xml') || file.name.toLowerCase().endsWith('.arq')) {
           const text = await file.text()
           notas = parseXMLNFSe(text)
         } else {
@@ -213,7 +213,7 @@ export function ImportacaoNF({ medicos, onRefresh }) {
               <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--g2)', marginBottom: 2 }}>Importação em lote</div>
               <div style={{ fontSize: 12, color: 'var(--n4)' }}>Selecione <strong>vários arquivos de uma vez</strong> — XML, Excel e CSV juntos. O sistema processa tudo automaticamente.</div>
             </div>
-            <button className="btn btn-primary" style={{ marginLeft: 'auto', flexShrink: 0 }} onClick={() => { fileRef.current.accept='.xml,.xlsx,.xls,.csv'; fileRef.current.click() }}>
+            <button className="btn btn-primary" style={{ marginLeft: 'auto', flexShrink: 0 }} onClick={() => { fileRef.current.accept='.xml,.arq,.xlsx,.xls,.csv'; fileRef.current.click() }}>
               📂 Selecionar arquivos
             </button>
           </div>
@@ -224,14 +224,14 @@ export function ImportacaoNF({ medicos, onRefresh }) {
               <div className="card-body">
                 <p style={{ fontSize: 13, color: 'var(--n4)', marginBottom: 14, lineHeight: 1.6 }}>Padrão <strong>SPED Fazenda (gov.br)</strong> — prefeitura de Olinda/PE e demais municípios. Suporta múltiplos XMLs.</p>
                 <div style={{ border: '2px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: 28, textAlign: 'center', cursor: 'pointer', background: 'var(--n10)', transition: 'all .2s' }}
-                  onClick={() => { fileRef.current.accept='.xml'; fileRef.current.click() }}
+                  onClick={() => { fileRef.current.accept='.xml,.arq'; fileRef.current.click() }}
                   onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor='var(--g5)'; e.currentTarget.style.background='var(--g10)' }}
                   onDragLeave={e => { e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.background='var(--n10)' }}
                   onDrop={e => { e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.background='var(--n10)'; handleDrop(e) }}>
                   <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--n2)', marginBottom: 3 }}>Arraste XMLs aqui</div>
                   <div style={{ fontSize: 11, color: 'var(--n5)' }}>ou clique para selecionar (múltiplos)</div>
-                  <div style={{ marginTop: 10 }}><span style={{ background: 'var(--g10)', color: 'var(--g3)', border: '1px solid var(--g8)', borderRadius: 99, fontSize: 10, fontWeight: 700, padding: '2px 10px' }}>XML</span></div>
+                  <div style={{ marginTop: 10 }}><><span style={{ background: 'var(--g10)', color: 'var(--g3)', border: '1px solid var(--g8)', borderRadius: 99, fontSize: 10, fontWeight: 700, padding: '2px 10px', marginRight: 4 }}>XML</span><span style={{ background: 'var(--orange-l)', color: 'var(--orange-d)', border: '1px solid #FED7AA', borderRadius: 99, fontSize: 10, fontWeight: 700, padding: '2px 10px' }}>ARQ</span></></div>
                 </div>
               </div>
             </div>

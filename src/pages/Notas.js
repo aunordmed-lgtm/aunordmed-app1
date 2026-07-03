@@ -268,6 +268,26 @@ export function Notas({ notas, medicos, onRefresh }) {
 
   return (
     <div className="page-content">
+      <style>{`
+        .med-hover-wrap { position: relative; }
+        .med-hover-tooltip {
+          display: none;
+          position: absolute;
+          top: calc(100% + 4px);
+          left: 0;
+          z-index: 999;
+          background: var(--n1);
+          color: #fff;
+          border-radius: var(--radius-lg);
+          padding: 8px 12px;
+          min-width: 220px;
+          max-width: 320px;
+          box-shadow: 0 8px 24px rgba(0,0,0,.25);
+          white-space: nowrap;
+          line-height: 1.8;
+        }
+        .med-hover-wrap:hover .med-hover-tooltip { display: block; }
+      `}</style>
       {/* Abas principais */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: '1px solid var(--border)' }}>
         {[['lista','📄 Notas fiscais'],['relatorio','📊 Relatório por período']].map(([id, label]) => (
@@ -309,8 +329,32 @@ export function Notas({ notas, medicos, onRefresh }) {
                     <td className="mono" style={{ color:'var(--n6)' }}>{i+1}</td>
                     <td className="mono" style={{ fontWeight:600 }}>{n.nf||'—'}</td>
                     <td>{n.tomador||'—'}</td>
-                    <td style={{ maxWidth:180, whiteSpace:'normal' }}>
-                      {n.medicos_nota?.map(m => <span key={m.nome} className="tag" style={{ margin:1 }}>{m.nome}</span>) || n.nomes_medicos || '—'}
+                    <td style={{ maxWidth:200 }}>
+                      {(() => {
+                        const meds = n.medicos_nota || (n.nomes_medicos ? n.nomes_medicos.split(',').map(s => ({ nome: s.trim() })) : [])
+                        if (!meds.length) return '—'
+                        const primeiro = meds[0].nome
+                        const todos = meds.map(m => m.nome).join('\n')
+                        const count = meds.length
+                        return (
+                          <div style={{ position:'relative', display:'inline-block' }} className="med-hover-wrap">
+                            <span className="tag" style={{ cursor: count > 1 ? 'help' : 'default', display:'flex', alignItems:'center', gap:4 }}>
+                              {primeiro}
+                              {count > 1 && <span style={{ background:'var(--g5)', color:'#fff', borderRadius:99, fontSize:9, fontWeight:700, padding:'1px 5px', flexShrink:0 }}>+{count-1}</span>}
+                            </span>
+                            {count > 1 && (
+                              <div className="med-hover-tooltip">
+                                {meds.map((m, i) => (
+                                  <div key={i} style={{ padding:'3px 0', borderBottom: i < meds.length-1 ? '1px solid rgba(255,255,255,.1)' : 'none', fontSize:11 }}>
+                                    {m.nome}
+                                    {m.valor_bruto_medico > 0 && <span style={{ float:'right', opacity:.7, marginLeft:8, fontFamily:'var(--mono)' }}>R$ {Number(m.valor_bruto_medico).toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </td>
                     <td className="mono">{fmtMes(n.comp)}</td>
                     <td className="mono" style={{ fontWeight:600 }}>{brl(n.bruto)}</td>

@@ -137,26 +137,51 @@ export function Notas({ notas, medicos, onRefresh }) {
         return
       }
 
+      // Função de similaridade: compara primeiro e segundo nome
+      const nomeSimilar = (nomeArquivo, nomeSistema) => {
+        const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+        const a = norm(nomeArquivo).split(' ').filter(Boolean)
+        const b = norm(nomeSistema).split(' ').filter(Boolean)
+        // Igual exato
+        if (norm(nomeArquivo) === norm(nomeSistema)) return true
+        // Primeiro e segundo nome batem
+        if (a.length >= 2 && b.length >= 2 && a[0] === b[0] && a[1] === b[1]) return true
+        // Primeiro nome bate e último nome bate
+        if (a.length >= 2 && b.length >= 2 && a[0] === b[0] && a[a.length-1] === b[b.length-1]) return true
+        // Arquivo contém os dois primeiros nomes do sistema
+        if (b.length >= 2 && a.includes(b[0]) && a.includes(b[1])) return true
+        // Sistema contém os dois primeiros nomes do arquivo
+        if (a.length >= 2 && b.includes(a[0]) && b.includes(a[1])) return true
+        return false
+      }
+
       const preview = []
       rows.slice(1).forEach(row => {
         if (!row.some(c => c !== '')) return
         const nomeMed = String(row[colMed] || '').trim()
-        const valorStr = String(row[colVal] || '0').replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.')
+        // Ignorar linha de total
+        if (nomeMed.toUpperCase() === 'TOTAL' || nomeMed.toUpperCase() === 'TOTAL GERAL') return
+        const valorStr = String(row[colVal] || '0').replace(/[R$\s.]/g, '').replace(',', '.')
         const valor = parseFloat(valorStr) || 0
         const ret = colRet >= 0 ? parseFloat(String(row[colRet] || '13').replace(',', '.')) || 13 : 13
         if (!nomeMed || valor <= 0) return
 
-        // Tentar encontrar médico cadastrado por similaridade
-        const medCad = medicos.find(m =>
-          m.nome.toLowerCase() === nomeMed.toLowerCase() ||
-          m.nome.toLowerCase().includes(nomeMed.toLowerCase().split(' ')[0]) ||
-          nomeMed.toLowerCase().includes(m.nome.toLowerCase().split(' ')[0])
-        )
-        preview.push({ nome: nomeMed, nomeCadastrado: medCad?.nome || '', crm: medCad?.crm || '', ret, valor, encontrado: !!medCad })
+        // Buscar médico por similaridade (nome exato, primeiro+segundo nome, primeiro+último)
+        const medCad = medicos.find(m => nomeSimilar(nomeMed, m.nome))
+        preview.push({
+          nome: nomeMed,
+          nomeCadastrado: medCad?.nome || '',
+          crm: medCad?.crm || '',
+          ret,
+          valor,
+          encontrado: !!medCad,
+          similar: !!medCad && medCad.nome.toLowerCase() !== nomeMed.toLowerCase()
+        })
       })
 
       if (!preview.length) { setImportErro('Nenhum médico encontrado no arquivo.'); return }
 
+      // Total é a SOMA dos individuais (ignora linha TOTAL do Excel)
       const total = preview.reduce((a, m) => a + m.valor, 0)
       setImportTotal(total)
 
@@ -558,7 +583,7 @@ export function Notas({ notas, medicos, onRefresh }) {
                         <tr key={i} style={{ background: !m.encontrado?'#FFFBEB':i%2===0?'#fff':'var(--n10)' }}>
                           <td style={{ fontSize:12 }}>{m.nome}</td>
                           <td style={{ fontSize:12, fontWeight:500, color:m.encontrado?'var(--g3)':'var(--orange-d)' }}>
-                            {m.encontrado ? m.nomeCadastrado : '⚠️ Não cadastrado'}
+                            {m.encontrado ? (m.similar ? `${m.nomeCadastrado} ↩` : m.nomeCadastrado) : '⚠️ Não cadastrado'}
                           </td>
                           <td style={{ fontSize:11, color:'var(--n5)' }}>{m.crm||'—'}</td>
                           <td className="mono" style={{ textAlign:'right', fontWeight:600 }}>{brl(m.valor)}</td>

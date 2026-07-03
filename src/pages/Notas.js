@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
-import { brl, pct, fmtMes, fmtData, uid } from '../lib/helpers'
+import { brl, pct, fmtMes, uid } from '../lib/helpers'
 import * as XLSX from 'xlsx'
 
 const IMPOSTOS = 0.0615
@@ -18,22 +18,26 @@ function calcNota(bruto, medsSel) {
     return { ...ms, repasse }
   })
   const margem = recebido - totalRepasse
-  const pctMargem = recebido > 0 ? margem / recebido : 0
-  return { bruto: b, recebido, totalRepasse, margem, pct_margem: pctMargem, meds }
+  return { bruto: b, recebido, totalRepasse, margem, pct_margem: recebido > 0 ? margem / recebido : 0, meds }
 }
 
 export function Notas({ notas, medicos, onRefresh }) {
   const { toast } = useToast()
-  const [aba, setAba] = useState('lista') // lista | relatorio
+  const [aba, setAba] = useState('lista')
   const [modalOpen, setModalOpen] = useState(false)
+  const [abaModal, setAbaModal] = useState('dados') // dados | importar
   const [editando, setEditando] = useState(null)
   const [loading, setLoading] = useState(false)
   const [busca, setBusca] = useState('')
   const [fltStatus, setFltStatus] = useState('')
   const [fltComp, setFltComp] = useState('')
-  const [fltMed, setFltMed] = useState('')
   const [medSel, setMedSel] = useState([])
   const [form, setForm] = useState({ nf: '', tomador: '', comp: '', emissao: '', status: 'Emitida', obs: '', bruto: '' })
+  // Importação Excel médicos
+  const [importPreview, setImportPreview] = useState([])
+  const [importErro, setImportErro] = useState('')
+  const [importTotal, setImportTotal] = useState(0)
+  const importRef = useRef()
   // Relatório
   const [relTipo, setRelTipo] = useState('mes')
   const [relMes, setRelMes] = useState(new Date().toISOString().substring(0, 7))
@@ -46,11 +50,9 @@ export function Notas({ notas, medicos, onRefresh }) {
   const filtradas = useMemo(() => notas.filter(n =>
     (!busca || n.nf?.toLowerCase().includes(busca.toLowerCase()) || n.tomador?.toLowerCase().includes(busca.toLowerCase())) &&
     (!fltStatus || n.status === fltStatus) &&
-    (!fltComp || n.comp === fltComp) &&
-    (!fltMed || n.nomes_medicos?.includes(fltMed))
-  ), [notas, busca, fltStatus, fltComp, fltMed])
+    (!fltComp || n.comp === fltComp)
+  ), [notas, busca, fltStatus, fltComp])
 
-  // Dados do relatório
   const notasRel = useMemo(() => {
     if (relTipo === 'todos') return notas
     if (relTipo === 'mes') return relMes ? notas.filter(n => n.comp === relMes) : notas
@@ -90,6 +92,9 @@ export function Notas({ notas, medicos, onRefresh }) {
     setEditando(null)
     setForm({ nf: '', tomador: '', comp: '', emissao: '', status: 'Emitida', obs: '', bruto: '' })
     setMedSel([])
+    setAbaModal('dados')
+    setImportPreview([])
+    setImportErro('')
     setModalOpen(true)
   }
 
@@ -97,6 +102,9 @@ export function Notas({ notas, medicos, onRefresh }) {
     setEditando(nota)
     setForm({ nf: nota.nf || '', tomador: nota.tomador || '', comp: nota.comp || '', emissao: nota.emissao?.split('T')[0] || '', status: nota.status || 'Emitida', obs: nota.obs || '', bruto: nota.bruto || '' })
     setMedSel(nota.medicos_nota?.map(mn => ({ nome: mn.nome, crm: mn.crm || '', ret: mn.retencao_individual || 13, valor: mn.valor_bruto_medico || '' })) || [])
+    setAbaModal('dados')
+    setImportPreview([])
+    setImportErro('')
     setModalOpen(true)
   }
 
@@ -106,6 +114,71 @@ export function Notas({ notas, medicos, onRefresh }) {
     const med = medicos.find(m => m.nome === nome)
     if (!med) return
     setMedSel(prev => [...prev, { nome, crm: med?.crm || '', ret: med?.retencao || 13, valor: '' }])
+  }
+
+  // Importação Excel médicos
+  const processarExcelMedicos = async (file) => {
+    setImportErro('')
+    setImportPreview([])
+    try {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer, { type: 'array' })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+      if (rows.length < 2) { setImportErro('Arquivo vazio.'); return }
+
+      const header = rows[0].map(h => String(h).toLowerCase().trim())
+      const colMed = header.findIndex(h => h.includes('médico') || h.includes('medico') || h.includes('nome'))
+      const colVal = header.findIndex(h => h.includes('valor') || h.includes('subtotal') || h.includes('sub'))
+      const colRet = header.findIndex(h => h.includes('reten') || h.includes('%'))
+
+      if (colMed < 0 || colVal < 0) {
+        setImportErro('Colunas não encontradas. O arquivo precisa ter colunas "Médico" e "Valor".')
+        return
+      }
+
+      const preview = []
+      rows.slice(1).forEach(row => {
+        if (!row.some(c => c !== '')) return
+        const nomeMed = String(row[colMed] || '').trim()
+        const valorStr = String(row[colVal] || '0').replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.')
+        const valor = parseFloat(valorStr) || 0
+        const ret = colRet >= 0 ? parseFloat(String(row[colRet] || '13').replace(',', '.')) || 13 : 13
+        if (!nomeMed || valor <= 0) return
+
+        // Tentar encontrar médico cadastrado por similaridade
+        const medCad = medicos.find(m =>
+          m.nome.toLowerCase() === nomeMed.toLowerCase() ||
+          m.nome.toLowerCase().includes(nomeMed.toLowerCase().split(' ')[0]) ||
+          nomeMed.toLowerCase().includes(m.nome.toLowerCase().split(' ')[0])
+        )
+        preview.push({ nome: nomeMed, nomeCadastrado: medCad?.nome || '', crm: medCad?.crm || '', ret, valor, encontrado: !!medCad })
+      })
+
+      if (!preview.length) { setImportErro('Nenhum médico encontrado no arquivo.'); return }
+
+      const total = preview.reduce((a, m) => a + m.valor, 0)
+      setImportTotal(total)
+
+      const bruto = parseFloat(form.bruto) || 0
+      const diff = Math.abs(total - bruto)
+      if (bruto > 0 && diff > 0.01) {
+        setImportErro(`DIFERENÇA: Total importado R$ ${total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ≠ Valor bruto da nota R$ ${bruto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} — Diferença: R$ ${diff.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`)
+      }
+
+      setImportPreview(preview)
+    } catch(e) { setImportErro('Erro ao ler arquivo: ' + e.message) }
+  }
+
+  const confirmarImport = () => {
+    const novos = importMedPreview => importMedPreview.map(m => ({
+      nome: m.nomeCadastrado || m.nome, crm: m.crm || '', ret: m.ret, valor: String(m.valor)
+    }))
+    setMedSel(novos(importPreview))
+    setAbaModal('dados')
+    setImportPreview([])
+    setImportErro('')
+    toast(`${importPreview.length} médico(s) importado(s)!`)
   }
 
   const salvar = async () => {
@@ -121,7 +194,7 @@ export function Notas({ notas, medicos, onRefresh }) {
       retencao_individual: parseFloat(ms.ret) || 13,
       repasse: parseFloat(ms.valor || 0) * (1 - parseFloat(ms.ret || 13) / 100)
     })) : []
-    const payload = { ...form, bruto: calc.bruto, recebido: calc.recebido, total_repasse: calc.totalRepasse, margem: calc.margem, pct_margem: calc.pct_margem, medicos_nota, nomes_medicos: medSel.map(m => m.nome).join(', ') }
+    const payload = { ...form, bruto: calc.bruto, recebido: calc.recebido, total_repasse: calc.totalRepasse, margem: calc.margem, pct_margem: calc.pct_margem, medicos_nota: medicos_nota.length ? medicos_nota : null, nomes_medicos: medSel.map(m => m.nome).join(', ') || null }
     setLoading(true)
     try {
       if (editando) {
@@ -132,16 +205,13 @@ export function Notas({ notas, medicos, onRefresh }) {
         for (const ms of medSel) {
           const med = medicos.find(m => m.nome === ms.nome)
           const repMed = parseFloat(ms.valor || 0) * (1 - parseFloat(ms.ret || 13) / 100)
-          const existing = await supabase.from('comprovantes').select('id').eq('nf_id', nova?.id).eq('medico_nome', ms.nome).maybeSingle()
-          if (!existing?.data) {
-            await supabase.from('comprovantes').insert({ token: uid(), nf_id: nova?.id, medico_nome: ms.nome, medico_crm: med?.crm || null, tomador: form.tomador, valor_repasse: repMed, competencia: form.comp || null, dados_extras: { nf: form.nf, pix: med?.chave_pix, tipo_pix: med?.tipo_pix } })
-          }
+          await supabase.from('comprovantes').insert({ token: uid(), nf_id: nova?.id, medico_nome: ms.nome, medico_crm: med?.crm || null, tomador: form.tomador, valor_repasse: repMed, competencia: form.comp || null, dados_extras: { nf: form.nf, pix: med?.chave_pix } }).catch(() => {})
         }
         toast('Nota adicionada!')
       }
       setModalOpen(false)
       onRefresh()
-    } catch (e) { toast('Erro: ' + e.message, 'error') }
+    } catch(e) { toast('Erro: ' + e.message, 'error') }
     setLoading(false)
   }
 
@@ -158,27 +228,29 @@ export function Notas({ notas, medicos, onRefresh }) {
   }
 
   const exportarRelatorio = () => {
-    const rows = [['NF', 'Tomador', 'Médicos', 'Competência', 'Bruto', 'Recebido', 'Repasse', 'Margem', '% Margem', 'Status']]
+    const rows = [['NF','Tomador','Médicos','Competência','Bruto','Recebido','Repasse','Margem','% Margem','Status']]
     notasRel.forEach(n => rows.push([n.nf, n.tomador, n.nomes_medicos, fmtMes(n.comp), +(n.bruto||0).toFixed(2), +(n.recebido||0).toFixed(2), +(n.total_repasse||0).toFixed(2), +(n.margem||0).toFixed(2), +((n.pct_margem||0)*100).toFixed(2)+'%', n.status]))
     const ws = XLSX.utils.aoa_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Notas')
-    XLSX.writeFile(wb, `notas_${relTipo === 'mes' ? relMes : 'periodo'}.xlsx`)
+    XLSX.writeFile(wb, `notas_${relMes || 'periodo'}.xlsx`)
     toast('Excel exportado!')
   }
 
+  const brutoNum = parseFloat(form.bruto) || 0
+  const diffImport = Math.abs(importTotal - brutoNum)
+  const importOk = brutoNum > 0 && importPreview.length > 0 && diffImport <= 0.01
+
   return (
     <div className="page-content">
-      {/* Abas */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
-        {[['lista', '📄 Notas fiscais'], ['relatorio', '📊 Relatório por período']].map(([id, label]) => (
-          <button key={id} onClick={() => setAba(id)} style={{ padding: '8px 18px', border: 'none', borderBottom: aba === id ? '2px solid var(--g5)' : '2px solid transparent', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: aba === id ? 600 : 400, color: aba === id ? 'var(--g3)' : 'var(--n5)', fontFamily: 'var(--sans)' }}>
+      {/* Abas principais */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: '1px solid var(--border)' }}>
+        {[['lista','📄 Notas fiscais'],['relatorio','📊 Relatório por período']].map(([id, label]) => (
+          <button key={id} onClick={() => setAba(id)} style={{ padding: '8px 18px', border: 'none', borderBottom: aba===id?'2px solid var(--g5)':'2px solid transparent', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: aba===id?600:400, color: aba===id?'var(--g3)':'var(--n5)', fontFamily: 'var(--sans)' }}>
             {label}
           </button>
         ))}
-        {aba === 'lista' && (
-          <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={abrirNova}>+ Nova nota</button>
-        )}
+        {aba === 'lista' && <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={abrirNova}>+ Nova nota</button>}
       </div>
 
       {/* ABA LISTA */}
@@ -197,10 +269,6 @@ export function Notas({ notas, medicos, onRefresh }) {
               <option value="">Competências</option>
               {comps.map(c => <option key={c} value={c}>{fmtMes(c)}</option>)}
             </select>
-            <select className="filter-select" value={fltMed} onChange={e => setFltMed(e.target.value)}>
-              <option value="">Todos médicos</option>
-              {medicosOrdenados.map(m => <option key={m.id} value={m.nome}>{m.nome}</option>)}
-            </select>
           </div>
           <div className="table-wrap">
             <table>
@@ -212,27 +280,27 @@ export function Notas({ notas, medicos, onRefresh }) {
                 {filtradas.length === 0 ? (
                   <tr><td colSpan={11}><div className="empty-state"><div className="empty-icon">📄</div><h4>Nenhuma nota</h4><p>Clique em "+ Nova nota" para registrar</p></div></td></tr>
                 ) : filtradas.map((n, i) => (
-                  <tr key={n.id} className={n.status === 'Emitida' ? 'row-alert' : ''}>
-                    <td className="mono" style={{ color: 'var(--n6)' }}>{i + 1}</td>
-                    <td className="mono" style={{ fontWeight: 600 }}>{n.nf || '—'}</td>
-                    <td>{n.tomador || '—'}</td>
-                    <td style={{ maxWidth: 180, whiteSpace: 'normal' }}>
-                      {n.medicos_nota?.map(m => <span key={m.nome} className="tag" style={{ margin: 1 }}>{m.nome}</span>) || n.nomes_medicos || '—'}
+                  <tr key={n.id}>
+                    <td className="mono" style={{ color:'var(--n6)' }}>{i+1}</td>
+                    <td className="mono" style={{ fontWeight:600 }}>{n.nf||'—'}</td>
+                    <td>{n.tomador||'—'}</td>
+                    <td style={{ maxWidth:180, whiteSpace:'normal' }}>
+                      {n.medicos_nota?.map(m => <span key={m.nome} className="tag" style={{ margin:1 }}>{m.nome}</span>) || n.nomes_medicos || '—'}
                     </td>
                     <td className="mono">{fmtMes(n.comp)}</td>
-                    <td className="mono" style={{ fontWeight: 600 }}>{brl(n.bruto)}</td>
-                    <td className="mono" style={{ color: 'var(--blue)' }}>{brl(n.recebido)}</td>
-                    <td className="mono" style={{ color: 'var(--n4)' }}>{brl(n.total_repasse || 0)}</td>
-                    <td className="mono" style={{ color: 'var(--g3)', fontWeight: 600 }}>{brl(n.margem)}</td>
+                    <td className="mono" style={{ fontWeight:600 }}>{brl(n.bruto)}</td>
+                    <td className="mono" style={{ color:'var(--blue)' }}>{brl(n.recebido)}</td>
+                    <td className="mono" style={{ color:'var(--n4)' }}>{brl(n.total_repasse||0)}</td>
+                    <td className="mono" style={{ color:'var(--g3)', fontWeight:600 }}>{brl(n.margem)}</td>
                     <td>
-                      <select style={{ height: 26, fontSize: 11, width: 130, border: '1px solid var(--border)', borderRadius: 6, padding: '0 6px', fontFamily: 'var(--sans)' }}
+                      <select style={{ height:26, fontSize:11, width:130, border:'1px solid var(--border)', borderRadius:6, padding:'0 6px', fontFamily:'var(--sans)' }}
                         value={n.status} onChange={e => alterarStatus(n.id, e.target.value)}>
                         <option value="Emitida">Emitida</option>
                         <option value="Recebida">Recebida</option>
                         <option value="Paga ao médico">Paga ao médico</option>
                       </select>
                     </td>
-                    <td style={{ display: 'flex', gap: 4, paddingTop: 6 }}>
+                    <td style={{ display:'flex', gap:4, paddingTop:6 }}>
                       <button className="btn btn-ghost btn-xs" onClick={() => abrirEditar(n)}>✏️</button>
                       <button className="btn btn-danger btn-xs" onClick={() => excluir(n.id)}>✕</button>
                     </td>
@@ -247,109 +315,91 @@ export function Notas({ notas, medicos, onRefresh }) {
       {/* ABA RELATÓRIO */}
       {aba === 'relatorio' && (
         <>
-          {/* Filtros */}
-          <div className="card" style={{ marginBottom: 14 }}>
+          <div className="card" style={{ marginBottom:14 }}>
             <div className="card-body">
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <div className="field">
-                  <label>Período</label>
-                  <select style={{ height: 36 }} value={relTipo} onChange={e => setRelTipo(e.target.value)}>
+              <div style={{ display:'flex', gap:10, alignItems:'flex-end', flexWrap:'wrap' }}>
+                <div className="field"><label>Período</label>
+                  <select style={{ height:36 }} value={relTipo} onChange={e => setRelTipo(e.target.value)}>
                     <option value="mes">Mês específico</option>
                     <option value="intervalo">Intervalo</option>
-                    <option value="todos">Todos os períodos</option>
+                    <option value="todos">Todos</option>
                   </select>
                 </div>
-                {relTipo === 'mes' && (
-                  <div className="field"><label>Mês/Ano</label><input type="month" style={{ height: 36 }} value={relMes} onChange={e => setRelMes(e.target.value)} /></div>
-                )}
-                {relTipo === 'intervalo' && (
-                  <>
-                    <div className="field"><label>De</label><input type="month" style={{ height: 36 }} value={relDe} onChange={e => setRelDe(e.target.value)} /></div>
-                    <div className="field"><label>Até</label><input type="month" style={{ height: 36 }} value={relAte} onChange={e => setRelAte(e.target.value)} /></div>
-                  </>
-                )}
+                {relTipo==='mes' && <div className="field"><label>Mês/Ano</label><input type="month" style={{ height:36 }} value={relMes} onChange={e => setRelMes(e.target.value)}/></div>}
+                {relTipo==='intervalo' && <>
+                  <div className="field"><label>De</label><input type="month" style={{ height:36 }} value={relDe} onChange={e => setRelDe(e.target.value)}/></div>
+                  <div className="field"><label>Até</label><input type="month" style={{ height:36 }} value={relAte} onChange={e => setRelAte(e.target.value)}/></div>
+                </>}
                 <button className="btn btn-ghost btn-sm" onClick={exportarRelatorio}>⬇ Exportar Excel</button>
               </div>
             </div>
           </div>
-
-          {/* KPIs */}
-          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 14 }}>
+          <div className="kpi-grid" style={{ gridTemplateColumns:'repeat(4,1fr)', marginBottom:14 }}>
             {[
-              { bar: 'var(--g5)', ic: 'var(--g10)', icon: '📄', label: 'Notas no período', value: totaisRel.count, sub: '' },
-              { bar: 'var(--g5)', ic: 'var(--g10)', icon: '💰', label: 'Total bruto', value: brl(totaisRel.bruto), sub: '' },
-              { bar: 'var(--blue)', ic: 'var(--blue-l)', icon: '📥', label: 'Total recebido', value: brl(totaisRel.recebido), sub: 'Após impostos' },
-              { bar: 'var(--g5)', ic: 'var(--g10)', icon: '📈', label: 'Margem empresa', value: brl(totaisRel.margem), sub: totaisRel.recebido > 0 ? pct(totaisRel.margem / totaisRel.recebido) : '—' },
-            ].map((k, i) => (
+              { bar:'var(--g5)', ic:'var(--g10)', icon:'📄', label:'Notas', value:totaisRel.count },
+              { bar:'var(--g5)', ic:'var(--g10)', icon:'💰', label:'Total bruto', value:brl(totaisRel.bruto) },
+              { bar:'var(--blue)', ic:'var(--blue-l)', icon:'📥', label:'Recebido', value:brl(totaisRel.recebido), sub:'Após impostos' },
+              { bar:'var(--g5)', ic:'var(--g10)', icon:'📈', label:'Margem', value:brl(totaisRel.margem), sub:totaisRel.recebido>0?pct(totaisRel.margem/totaisRel.recebido):'—' },
+            ].map((k,i) => (
               <div key={i} className="kpi">
-                <div className="kpi-bar" style={{ background: k.bar }} />
-                <div className="kpi-icon" style={{ background: k.ic }}>{k.icon}</div>
+                <div className="kpi-bar" style={{ background:k.bar }}/>
+                <div className="kpi-icon" style={{ background:k.ic }}>{k.icon}</div>
                 <div className="kpi-label">{k.label}</div>
                 <div className="kpi-value">{k.value}</div>
                 {k.sub && <div className="kpi-sub">{k.sub}</div>}
               </div>
             ))}
           </div>
-
-          {/* Por mês */}
-          <div className="card" style={{ marginBottom: 14 }}>
+          <div className="card" style={{ marginBottom:14 }}>
             <div className="card-header"><h3>📅 Emitido por mês</h3></div>
             <div className="table-wrap">
               <table>
                 <thead><tr>
-                  <th>Competência</th><th style={{ textAlign: 'right' }}>NFs</th><th style={{ textAlign: 'right' }}>Bruto</th><th style={{ textAlign: 'right' }}>Recebido</th><th style={{ textAlign: 'right' }}>Repasse</th><th style={{ textAlign: 'right' }}>Margem</th><th style={{ textAlign: 'right' }}>% Margem</th>
+                  <th>Competência</th><th style={{textAlign:'right'}}>NFs</th><th style={{textAlign:'right'}}>Bruto</th><th style={{textAlign:'right'}}>Recebido</th><th style={{textAlign:'right'}}>Repasse</th><th style={{textAlign:'right'}}>Margem</th><th style={{textAlign:'right'}}>% Margem</th>
                 </tr></thead>
                 <tbody>
-                  {byComp.length === 0 ? (
-                    <tr><td colSpan={7}><div className="empty-state" style={{ padding: '1.5rem' }}><p>Nenhuma nota no período</p></div></td></tr>
-                  ) : byComp.map((m, i) => (
-                    <tr key={m.comp} style={{ background: i % 2 === 0 ? '#fff' : 'var(--n10)' }}>
-                      <td style={{ fontWeight: 600 }}>{m.label}</td>
-                      <td className="mono" style={{ textAlign: 'right' }}>{m.count}</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 600 }}>{brl(m.bruto)}</td>
-                      <td className="mono" style={{ textAlign: 'right', color: 'var(--blue)' }}>{brl(m.recebido)}</td>
-                      <td className="mono" style={{ textAlign: 'right', color: 'var(--n4)' }}>{brl(m.repasse)}</td>
-                      <td className="mono" style={{ textAlign: 'right', color: 'var(--g3)', fontWeight: 700 }}>{brl(m.margem)}</td>
-                      <td className="mono" style={{ textAlign: 'right' }}>{m.recebido > 0 ? pct(m.margem / m.recebido) : '—'}</td>
+                  {byComp.length===0 ? <tr><td colSpan={7}><div className="empty-state" style={{padding:'1.5rem'}}><p>Nenhuma nota no período</p></div></td></tr>
+                  : byComp.map((m,i) => (
+                    <tr key={m.comp} style={{ background:i%2===0?'#fff':'var(--n10)' }}>
+                      <td style={{ fontWeight:600 }}>{m.label}</td>
+                      <td className="mono" style={{textAlign:'right'}}>{m.count}</td>
+                      <td className="mono" style={{textAlign:'right',fontWeight:600}}>{brl(m.bruto)}</td>
+                      <td className="mono" style={{textAlign:'right',color:'var(--blue)'}}>{brl(m.recebido)}</td>
+                      <td className="mono" style={{textAlign:'right',color:'var(--n4)'}}>{brl(m.repasse)}</td>
+                      <td className="mono" style={{textAlign:'right',color:'var(--g3)',fontWeight:700}}>{brl(m.margem)}</td>
+                      <td className="mono" style={{textAlign:'right'}}>{m.recebido>0?pct(m.margem/m.recebido):'—'}</td>
                     </tr>
                   ))}
-                  {byComp.length > 0 && (
-                    <tr style={{ background: 'var(--g1)' }}>
-                      <td style={{ fontWeight: 700, color: '#fff' }}>TOTAL</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 700, color: 'rgba(255,255,255,.85)' }}>{totaisRel.count}</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 700, color: 'rgba(255,255,255,.85)' }}>{brl(totaisRel.bruto)}</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 700, color: 'rgba(255,255,255,.85)' }}>{brl(totaisRel.recebido)}</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 700, color: 'rgba(255,255,255,.85)' }}>{brl(totaisRel.repasse)}</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--g7)' }}>{brl(totaisRel.margem)}</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--g7)' }}>{totaisRel.recebido > 0 ? pct(totaisRel.margem / totaisRel.recebido) : '—'}</td>
-                    </tr>
-                  )}
+                  {byComp.length>0 && <tr style={{background:'var(--g1)'}}>
+                    <td style={{fontWeight:700,color:'#fff'}}>TOTAL</td>
+                    <td className="mono" style={{textAlign:'right',fontWeight:700,color:'rgba(255,255,255,.85)'}}>{totaisRel.count}</td>
+                    <td className="mono" style={{textAlign:'right',fontWeight:700,color:'rgba(255,255,255,.85)'}}>{brl(totaisRel.bruto)}</td>
+                    <td className="mono" style={{textAlign:'right',fontWeight:700,color:'rgba(255,255,255,.85)'}}>{brl(totaisRel.recebido)}</td>
+                    <td className="mono" style={{textAlign:'right',fontWeight:700,color:'rgba(255,255,255,.85)'}}>{brl(totaisRel.repasse)}</td>
+                    <td className="mono" style={{textAlign:'right',fontWeight:700,color:'var(--g7)'}}>{brl(totaisRel.margem)}</td>
+                    <td className="mono" style={{textAlign:'right',fontWeight:700,color:'var(--g7)'}}>{totaisRel.recebido>0?pct(totaisRel.margem/totaisRel.recebido):'—'}</td>
+                  </tr>}
                 </tbody>
               </table>
             </div>
           </div>
-
-          {/* Detalhado */}
           <div className="card">
-            <div className="card-header"><h3>📋 Notas detalhadas no período</h3></div>
+            <div className="card-header"><h3>📋 Notas no período</h3></div>
             <div className="table-wrap">
               <table>
-                <thead><tr>
-                  <th>NF</th><th>Tomador</th><th>Médicos</th><th>Competência</th><th style={{ textAlign: 'right' }}>Bruto</th><th style={{ textAlign: 'right' }}>Recebido</th><th style={{ textAlign: 'right' }}>Margem</th><th>Status</th>
-                </tr></thead>
+                <thead><tr><th>NF</th><th>Tomador</th><th>Médicos</th><th>Competência</th><th style={{textAlign:'right'}}>Bruto</th><th style={{textAlign:'right'}}>Recebido</th><th style={{textAlign:'right'}}>Margem</th><th>Status</th></tr></thead>
                 <tbody>
-                  {notasRel.length === 0 ? (
-                    <tr><td colSpan={8}><div className="empty-state" style={{ padding: '1.5rem' }}><p>Nenhuma nota no período</p></div></td></tr>
-                  ) : notasRel.map(n => (
+                  {notasRel.length===0 ? <tr><td colSpan={8}><div className="empty-state" style={{padding:'1.5rem'}}><p>Nenhuma nota no período</p></div></td></tr>
+                  : notasRel.map(n => (
                     <tr key={n.id}>
-                      <td className="mono" style={{ fontWeight: 600 }}>{n.nf || '—'}</td>
-                      <td>{n.tomador || '—'}</td>
-                      <td style={{ fontSize: 11 }}>{n.nomes_medicos || '—'}</td>
+                      <td className="mono" style={{fontWeight:600}}>{n.nf||'—'}</td>
+                      <td>{n.tomador||'—'}</td>
+                      <td style={{fontSize:11}}>{n.nomes_medicos||'—'}</td>
                       <td className="mono">{fmtMes(n.comp)}</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 600 }}>{brl(n.bruto)}</td>
-                      <td className="mono" style={{ textAlign: 'right', color: 'var(--blue)' }}>{brl(n.recebido)}</td>
-                      <td className="mono" style={{ textAlign: 'right', color: 'var(--g3)', fontWeight: 600 }}>{brl(n.margem)}</td>
-                      <td><span className={`badge ${n.status === 'Paga ao médico' ? 'badge-ok' : n.status === 'Recebida' ? 'badge-rec' : 'badge-emit'}`}>{n.status}</span></td>
+                      <td className="mono" style={{textAlign:'right',fontWeight:600}}>{brl(n.bruto)}</td>
+                      <td className="mono" style={{textAlign:'right',color:'var(--blue)'}}>{brl(n.recebido)}</td>
+                      <td className="mono" style={{textAlign:'right',color:'var(--g3)',fontWeight:600}}>{brl(n.margem)}</td>
+                      <td><span className={`badge ${n.status==='Paga ao médico'?'badge-ok':n.status==='Recebida'?'badge-rec':'badge-emit'}`}>{n.status}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -360,104 +410,175 @@ export function Notas({ notas, medicos, onRefresh }) {
       )}
 
       {/* MODAL NOTA */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editando ? 'Editar nota' : 'Nova nota fiscal'} size="wide"
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editando ? 'Editar nota fiscal' : 'Nova nota fiscal'} size="wide"
         footer={<>
           <button className="btn btn-ghost" onClick={() => setModalOpen(false)}>Cancelar</button>
           <button className="btn btn-primary" onClick={salvar} disabled={loading}>
-            {loading ? <><span className="spinner spinner-sm" /> Salvando…</> : 'Salvar nota'}
+            {loading ? <><span className="spinner spinner-sm"/> Salvando…</> : 'Salvar nota'}
           </button>
         </>}>
-        <div className="form-grid">
-          {[['nf','Nº da NF *','text','00001'],['tomador','Tomador *','text','Unimed…'],['comp','Competência','month',''],['emissao','Data emissão','date',''],['obs','Observações','text','']].map(([k,l,t,p]) => (
-            <div key={k} className="field">
-              <label>{l}</label>
-              <input type={t} value={form[k]} onChange={e => setForm(f => ({...f,[k]:e.target.value}))} placeholder={p} />
-            </div>
+
+        {/* Sub-abas do modal */}
+        <div style={{ display:'flex', gap:2, marginBottom:16, borderBottom:'1px solid var(--border)' }}>
+          {[['dados','📋 Dados da nota'],['importar','📊 Importar médicos (Excel)']].map(([id,label]) => (
+            <button key={id} onClick={() => setAbaModal(id)} style={{ padding:'7px 16px', border:'none', borderBottom:abaModal===id?'2px solid var(--g5)':'2px solid transparent', background:'none', cursor:'pointer', fontSize:12, fontWeight:abaModal===id?600:400, color:abaModal===id?'var(--g3)':'var(--n5)', fontFamily:'var(--sans)' }}>
+              {label}
+            </button>
           ))}
-          <div className="field">
-            <label>Status</label>
-            <select value={form.status} onChange={e => setForm(f => ({...f,status:e.target.value}))}>
-              <option value="Emitida">Emitida</option>
-              <option value="Recebida">Recebida</option>
-              <option value="Paga ao médico">Paga ao médico</option>
-            </select>
-          </div>
-          <div className="field form-full">
-            <label>Valor bruto total (R$) *</label>
-            <input type="number" className="inp-money" value={form.bruto} onChange={e => setForm(f => ({...f,bruto:e.target.value}))} placeholder="0,00" min="0" step="0.01" />
-          </div>
         </div>
 
-        {/* Médicos */}
-        <div style={{ marginTop: 12 }}>
-          <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--n4)', textTransform: 'uppercase', letterSpacing: .4 }}>Médicos vinculados</label>
-          <div className="med-picker">
-            <div className="med-picker-header">
-              <span>Médico</span>
-              <div style={{ display: 'flex', gap: 36, fontSize: 10, color: 'var(--n5)' }}>
-                <span style={{ width: 100, textAlign: 'center' }}>Valor (R$)</span>
-                <span style={{ width: 100, textAlign: 'center' }}>% Retenção</span>
-                <span style={{ width: 30 }}></span>
-              </div>
-            </div>
-            <div className="med-picker-list">
-              {medSel.length === 0 && <div style={{ padding: 12, textAlign: 'center', color: 'var(--n6)', fontSize: 11 }}>Adicione ao menos um médico</div>}
-              {medSel.map((ms, i) => (
-                <div key={i} className="med-picker-row">
-                  <div>
-                    <div style={{ fontWeight: 500, fontSize: 12 }}>{ms.nome}</div>
-                    <div style={{ fontSize: 10, color: 'var(--n5)' }}>{ms.crm}</div>
-                  </div>
-                  <input type="number" value={ms.valor} placeholder="0,00" min="0" step="0.01"
-                    style={{ height: 28, fontSize: 12, fontFamily: 'var(--mono)', textAlign: 'right', padding: '0 6px', border: '1px solid var(--border)', borderRadius: 6 }}
-                    onChange={e => setMedSel(prev => prev.map((m, j) => j === i ? {...m, valor: e.target.value} : m))} />
-                  <input type="number" value={ms.ret} min="0" max="100" step="0.01"
-                    style={{ height: 28, fontSize: 12, fontFamily: 'var(--mono)', textAlign: 'right', padding: '0 6px', border: '1px solid var(--border)', borderRadius: 6 }}
-                    onChange={e => setMedSel(prev => prev.map((m, j) => j === i ? {...m, ret: e.target.value} : m))} />
-                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--n5)', fontSize: 14 }}
-                    onClick={() => setMedSel(prev => prev.filter((_, j) => j !== i))}>✕</button>
+        {/* ABA DADOS */}
+        {abaModal === 'dados' && (
+          <>
+            <div className="form-grid">
+              {[['nf','Nº da NF *','text','00001'],['tomador','Tomador *','text','Unimed…'],['comp','Competência','month',''],['emissao','Data emissão','date',''],['obs','Observações','text','']].map(([k,l,t,p]) => (
+                <div key={k} className="field">
+                  <label>{l}</label>
+                  <input type={t} value={form[k]} onChange={e => setForm(f=>({...f,[k]:e.target.value}))} placeholder={p}/>
                 </div>
               ))}
-            </div>
-            {/* Campo de busca com datalist */}
-            <div className="med-picker-add">
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input
-                  type="text"
-                  list="med-datalist"
-                  placeholder="🔍 Digite o nome do médico para adicionar..."
-                  id="med-search-input"
-                  autoComplete="off"
-                  style={{ height: 34, fontSize: 12, width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '0 10px', background: 'var(--n10)', fontFamily: 'var(--sans)' }}
-                  onChange={e => {
-                    const nome = e.target.value.trim()
-                    const med = medicosOrdenados.find(m => m.nome === nome)
-                    if (med) {
-                      adicionarMed(nome)
-                      setTimeout(() => { const el = document.getElementById('med-search-input'); if (el) el.value = '' }, 50)
-                    }
-                  }}
-                />
-                <datalist id="med-datalist">
-                  {medicosOrdenados.map(m => (
-                    <option key={m.id} value={m.nome}>{m.crm ? `${m.nome} (${m.crm})` : m.nome}</option>
-                  ))}
-                </datalist>
+              <div className="field">
+                <label>Status</label>
+                <select value={form.status} onChange={e => setForm(f=>({...f,status:e.target.value}))}>
+                  <option value="Emitida">Emitida</option>
+                  <option value="Recebida">Recebida</option>
+                  <option value="Paga ao médico">Paga ao médico</option>
+                </select>
+              </div>
+              <div className="field form-full">
+                <label>Valor bruto total (R$) *</label>
+                <input type="number" className="inp-money" value={form.bruto} onChange={e => setForm(f=>({...f,bruto:e.target.value}))} placeholder="0,00" min="0" step="0.01"/>
               </div>
             </div>
-            {medSel.length > 0 && form.bruto && Math.abs(medSel.reduce((a,m)=>a+(parseFloat(m.valor)||0),0) - parseFloat(form.bruto)) > 0.01 && (
-              <div className="pct-warn">⚠️ Soma dos valores dos médicos deve ser igual ao valor bruto total</div>
+
+            <div style={{ marginTop:12 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+                <label style={{ fontSize:10, fontWeight:700, color:'var(--n4)', textTransform:'uppercase', letterSpacing:.4 }}>Médicos vinculados</label>
+                <button type="button" className="btn btn-outline btn-xs" onClick={() => setAbaModal('importar')}>📊 Importar via Excel</button>
+              </div>
+              <div className="med-picker">
+                <div className="med-picker-header">
+                  <span>Médico</span>
+                  <div style={{ display:'flex', gap:36, fontSize:10, color:'var(--n5)' }}>
+                    <span style={{ width:100, textAlign:'center' }}>Valor (R$)</span>
+                    <span style={{ width:100, textAlign:'center' }}>% Retenção</span>
+                    <span style={{ width:30 }}></span>
+                  </div>
+                </div>
+                <div className="med-picker-list">
+                  {medSel.length===0 && <div style={{ padding:12, textAlign:'center', color:'var(--n6)', fontSize:11 }}>Nenhum médico adicionado</div>}
+                  {medSel.map((ms,i) => (
+                    <div key={i} className="med-picker-row">
+                      <div>
+                        <div style={{ fontWeight:500, fontSize:12 }}>{ms.nome}</div>
+                        <div style={{ fontSize:10, color:'var(--n5)' }}>{ms.crm}</div>
+                      </div>
+                      <input type="number" value={ms.valor} placeholder="0,00" min="0" step="0.01"
+                        style={{ height:28, fontSize:12, fontFamily:'var(--mono)', textAlign:'right', padding:'0 6px', border:'1px solid var(--border)', borderRadius:6 }}
+                        onChange={e => setMedSel(prev => prev.map((m,j) => j===i?{...m,valor:e.target.value}:m))}/>
+                      <input type="number" value={ms.ret} min="0" max="100" step="0.01"
+                        style={{ height:28, fontSize:12, fontFamily:'var(--mono)', textAlign:'right', padding:'0 6px', border:'1px solid var(--border)', borderRadius:6 }}
+                        onChange={e => setMedSel(prev => prev.map((m,j) => j===i?{...m,ret:e.target.value}:m))}/>
+                      <button style={{ background:'none', border:'none', cursor:'pointer', color:'var(--n5)', fontSize:14 }}
+                        onClick={() => setMedSel(prev => prev.filter((_,j) => j!==i))}>✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="med-picker-add">
+                  <input type="text" list="med-datalist" placeholder="🔍 Digite o nome do médico para adicionar..." id="med-search-input" autoComplete="off"
+                    style={{ height:34, fontSize:12, width:'100%', border:'1px solid var(--border)', borderRadius:6, padding:'0 10px', background:'var(--n10)', fontFamily:'var(--sans)' }}
+                    onChange={e => {
+                      const nome = e.target.value.trim()
+                      const med = medicosOrdenados.find(m => m.nome===nome)
+                      if (med) { adicionarMed(nome); setTimeout(() => { const el=document.getElementById('med-search-input'); if(el) el.value='' }, 50) }
+                    }}/>
+                  <datalist id="med-datalist">
+                    {medicosOrdenados.map(m => <option key={m.id} value={m.nome}>{m.crm?`${m.nome} (${m.crm})`:m.nome}</option>)}
+                  </datalist>
+                </div>
+                {medSel.length>0 && form.bruto && Math.abs(medSel.reduce((a,m)=>a+(parseFloat(m.valor)||0),0)-parseFloat(form.bruto))>0.01 && (
+                  <div className="pct-warn">⚠️ Soma dos valores deve ser igual ao valor bruto total</div>
+                )}
+              </div>
+            </div>
+
+            <div className="computed-row">
+              <div className="computed-box blue"><div className="computed-label">Recebido (−6,15%)</div><div className="computed-value">{brl(v.recebido)}</div></div>
+              <div className="computed-box"><div className="computed-label">Total repasse</div><div className="computed-value">{brl(v.totalRepasse)}</div></div>
+              <div className="computed-box highlight"><div className="computed-label">Margem empresa</div><div className="computed-value">{brl(v.margem)}</div></div>
+              <div className="computed-box"><div className="computed-label">% Margem</div><div className="computed-value">{pct(v.pct_margem)}</div></div>
+            </div>
+          </>
+        )}
+
+        {/* ABA IMPORTAR EXCEL */}
+        {abaModal === 'importar' && (
+          <div>
+            <div style={{ background:'var(--g10)', border:'1px solid var(--g8)', borderRadius:'var(--radius-lg)', padding:'12px 16px', marginBottom:14 }}>
+              <div style={{ fontSize:13, fontWeight:600, color:'var(--g2)', marginBottom:6 }}>📊 Importar médicos de planilha Excel</div>
+              <div style={{ fontSize:12, color:'var(--n4)', lineHeight:1.6 }}>
+                O arquivo deve ter colunas: <strong>Médico</strong> (nome), <strong>Valor</strong> (subtotal) e opcionalmente <strong>Retenção %</strong>.
+                O sistema verifica se o total importado é igual ao valor bruto da nota (<strong>{brl(brutoNum)}</strong>).
+              </div>
+            </div>
+
+            <div style={{ display:'flex', gap:10, marginBottom:14 }}>
+              <button className="btn btn-primary" onClick={() => importRef.current?.click()}>📂 Selecionar arquivo Excel</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => {
+                const ws = XLSX.utils.aoa_to_sheet([['Médico','Valor','Retenção %'],['Dr. Nome Completo','1250.00','13'],['Dra. Outra Médica','2000.00','13']])
+                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Médicos'); XLSX.writeFile(wb, 'modelo_medicos.xlsx'); toast('Modelo baixado!')
+              }}>⬇ Baixar modelo</button>
+              <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" style={{ display:'none' }} onChange={e => { if(e.target.files[0]) processarExcelMedicos(e.target.files[0]) }}/>
+            </div>
+
+            {/* Resultado da importação */}
+            {importErro && (
+              <div style={{ background: importErro.includes('DIFERENÇA') ? 'var(--yellow-l)' : 'var(--red-l)', border: `1px solid ${importErro.includes('DIFERENÇA')?'#FDE68A':'#FCA5A5'}`, borderRadius:'var(--radius-lg)', padding:'12px 16px', marginBottom:12, fontSize:12, fontWeight:600, color: importErro.includes('DIFERENÇA')?'#92400E':'var(--red-d)' }}>
+                {importErro.includes('DIFERENÇA') ? '⚠️' : '❌'} {importErro}
+              </div>
+            )}
+
+            {importPreview.length > 0 && (
+              <>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:'var(--n2)' }}>{importPreview.length} médico(s) encontrado(s) no arquivo</div>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, fontSize:12 }}>
+                    <span>Total importado: <strong style={{ color: importOk?'var(--g3)':'var(--red)' }}>{brl(importTotal)}</strong></span>
+                    <span>Valor bruto da nota: <strong>{brl(brutoNum)}</strong></span>
+                    {importOk && <span style={{ background:'var(--g10)', color:'var(--g3)', border:'1px solid var(--g8)', borderRadius:99, padding:'2px 10px', fontSize:11, fontWeight:700 }}>✓ Valores batem!</span>}
+                  </div>
+                </div>
+                <div className="table-wrap" style={{ marginBottom:14 }}>
+                  <table>
+                    <thead><tr>
+                      <th>Nome no arquivo</th><th>Médico no sistema</th><th>CRM</th><th style={{textAlign:'right'}}>Valor</th><th style={{textAlign:'center'}}>Ret %</th><th>Status</th>
+                    </tr></thead>
+                    <tbody>
+                      {importPreview.map((m,i) => (
+                        <tr key={i} style={{ background: !m.encontrado?'#FFFBEB':i%2===0?'#fff':'var(--n10)' }}>
+                          <td style={{ fontSize:12 }}>{m.nome}</td>
+                          <td style={{ fontSize:12, fontWeight:500, color:m.encontrado?'var(--g3)':'var(--orange-d)' }}>
+                            {m.encontrado ? m.nomeCadastrado : '⚠️ Não cadastrado'}
+                          </td>
+                          <td style={{ fontSize:11, color:'var(--n5)' }}>{m.crm||'—'}</td>
+                          <td className="mono" style={{ textAlign:'right', fontWeight:600 }}>{brl(m.valor)}</td>
+                          <td className="mono" style={{ textAlign:'center' }}>{m.ret}%</td>
+                          <td>{m.encontrado ? <span className="badge badge-ok">✓ OK</span> : <span className="badge badge-emit">Não cadastrado</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ display:'flex', gap:10 }}>
+                  <button className="btn btn-primary" onClick={confirmarImport}>
+                    ✓ Confirmar e aplicar médicos
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => { setImportPreview([]); setImportErro('') }}>Limpar</button>
+                </div>
+              </>
             )}
           </div>
-        </div>
-
-        {/* Calculados */}
-        <div className="computed-row">
-          <div className="computed-box blue"><div className="computed-label">Recebido (−6,15%)</div><div className="computed-value">{brl(v.recebido)}</div></div>
-          <div className="computed-box"><div className="computed-label">Total repasse</div><div className="computed-value">{brl(v.totalRepasse)}</div></div>
-          <div className="computed-box highlight"><div className="computed-label">Margem empresa</div><div className="computed-value">{brl(v.margem)}</div></div>
-          <div className="computed-box"><div className="computed-label">% Margem</div><div className="computed-value">{pct(v.pct_margem)}</div></div>
-        </div>
+        )}
       </Modal>
     </div>
   )

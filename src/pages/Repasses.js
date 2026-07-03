@@ -96,35 +96,93 @@ export function Repasses({ notas, medicos, onRefresh }) {
     setPagandoId(null)
   }
 
+  // Gerar CNAB 240 (.REM) padrão Banco Inter
+  const gerarCNAB240 = (lista, nomeArq) => {
+    const EMPRESA = { cnpj: '60577717000122', nome: '2HT0 LTDA', agencia: '0001', conta: '44349336', digitoConta: '7' }
+    const now = new Date()
+    const pad = (v, n, c='0') => String(v).padStart(n, c)
+    const padL = (v, n) => String(v).padEnd(n, ' ').substring(0, n)
+    const dataPagFmt = dataPag.replace(/-/g,'').replace(/(\d{4})(\d{2})(\d{2})/,'$3$2$1')
+    const dataGer = [pad(now.getDate(),2),pad(now.getMonth()+1,2),now.getFullYear()].join('')
+    const horaGer = [pad(now.getHours(),2),pad(now.getMinutes(),2),pad(now.getSeconds(),2)].join('')
+    const seq = pad(Math.floor(Math.random()*999999)+1, 6)
+    const linhas = []
+
+    // Header arquivo
+    let h = '077' + '0000' + '0' + ' '.repeat(9) + '2' + EMPRESA.cnpj.padStart(14,'0')
+    h += ' '.repeat(20) + EMPRESA.agencia.padStart(5,'0') + ' ' + EMPRESA.conta.padStart(12,'0') + EMPRESA.digitoConta + ' '
+    h += padL(EMPRESA.nome, 30) + padL('BANCO INTER S.A.', 30) + ' '.repeat(10)
+    h += '1' + dataGer + horaGer + seq + '103' + '01600' + ' '.repeat(49)
+    linhas.push(h)
+
+    // Header lote
+    let hl = '077' + '0001' + '1' + 'C' + '45' + '45' + '046' + ' ' + '2' + EMPRESA.cnpj.padStart(14,'0')
+    hl += ' '.repeat(20) + EMPRESA.agencia.padStart(5,'0') + ' ' + EMPRESA.conta.padStart(12,'0') + EMPRESA.digitoConta + ' '
+    hl += padL(EMPRESA.nome, 30) + ' '.repeat(40) + ' '.repeat(30) + ' '.repeat(30) + ' '.repeat(8)
+    linhas.push(hl)
+
+    let seqReg = 1
+    const tipoMap = { cpf:'1', cnpj:'2', email:'3', telefone:'4', aleatoria:'5', aleatorio:'5' }
+
+    lista.forEach(med => {
+      const valorCents = pad(Math.round(med.valor * 100), 15)
+      const nomeFav = padL(med.nome.toUpperCase(), 30)
+      const tipoChave = tipoMap[(med.tipo_pix||'cpf').toLowerCase()] || '1'
+      const chave = padL(med.chave_pix || '', 77)
+      const cpf = (med.cpf || '').replace(/\D/g,'').padStart(14,'0')
+
+      // Segmento A
+      let sa = '077' + '0001' + '3' + pad(seqReg,5) + 'A' + ' ' + '00'
+      sa += '077' + '00001' + ' ' + ' '.repeat(12) + ' ' + ' ' + nomeFav
+      sa += ' '.repeat(20) + dataPagFmt + 'BRL' + ' '.repeat(15) + valorCents
+      sa += ' '.repeat(20) + ' '.repeat(8) + '0'.repeat(15) + ' '.repeat(20) + '09' + ' ' + ' '.repeat(2) + ' '.repeat(3) + '0' + ' '.repeat(37)
+      linhas.push(sa)
+      seqReg++
+
+      // Segmento B
+      let sb = '077' + '0001' + '3' + pad(seqReg,5) + 'B' + ' '.repeat(3)
+      sb += (cpf.length > 11 ? '2' : '1') + cpf + ' '.repeat(30) + ' '.repeat(8)
+      sb += '0'.repeat(15) + '0'.repeat(15) + '0'.repeat(15) + '0'.repeat(15) + '0'.repeat(15)
+      sb += ' '.repeat(15) + tipoChave + chave + ' '.repeat(2)
+      linhas.push(sb)
+      seqReg++
+    })
+
+    // Trailer lote
+    const qtdLote = lista.length * 2 + 2
+    const totalValor = pad(Math.round(lista.reduce((a,m) => a+m.valor,0)*100), 18)
+    let tl = '077' + '0001' + '5' + ' '.repeat(9)
+    tl += pad(qtdLote,6) + pad(lista.length,6) + '0'.repeat(17) + pad(lista.length,6) + totalValor + ' '.repeat(170)
+    linhas.push(tl)
+
+    // Trailer arquivo
+    const qtdTotal = linhas.length + 1
+    let ta = '077' + '9999' + '9' + ' '.repeat(9) + '000001' + pad(qtdTotal,6) + '000000' + ' '.repeat(205)
+    linhas.push(ta)
+
+    // Download .REM
+    const blob = new Blob([linhas.join('
+')], { type: 'text/plain;charset=ascii' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = nomeArq
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const gerarCSVInter = (medico) => {
     if (!medico.chave_pix) { toast('Médico sem chave PIX cadastrada!', 'error'); return }
-    const rows = [
-      ['tipo_pagamento','nome_favorecido','chave_pix','tipo_chave','valor','data_pagamento','descricao'],
-      ['PIX', medico.nome, medico.chave_pix, (medico.tipo_pix || 'cpf').toUpperCase(),
-       medico.total_repasse.toFixed(2).replace('.', ','),
-       dataPag, `Repasse medico ${fltComp || 'geral'}`]
-    ]
-    const ws = XLSX.utils.aoa_to_sheet(rows)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'PIX')
-    XLSX.writeFile(wb, `repasse_${medico.nome.split(' ')[0]}_${fltComp || 'geral'}.csv`)
-    toast('CSV Inter gerado!')
+    gerarCNAB240([{ nome: medico.nome, chave_pix: medico.chave_pix, tipo_pix: medico.tipo_pix, valor: medico.total_repasse, cpf: medico.cpf || '' }], `CI240_001_000001.REM`)
+    toast('Arquivo .REM gerado para importar no Inter!')
   }
 
   const gerarCSVLote = () => {
     const pendentes = repassesFiltrados.filter(r => r.status !== 'pago' && r.chave_pix)
     if (!pendentes.length) { toast('Nenhum médico com PIX cadastrado para repasse.', 'error'); return }
-    const rows = [['tipo_pagamento','nome_favorecido','chave_pix','tipo_chave','valor','data_pagamento','descricao']]
-    pendentes.forEach(r => rows.push([
-      'PIX', r.nome, r.chave_pix, (r.tipo_pix || 'cpf').toUpperCase(),
-      r.total_repasse.toFixed(2).replace('.', ','),
-      dataPag, `Repasse medico ${fltComp || 'geral'}`
-    ]))
-    const ws = XLSX.utils.aoa_to_sheet(rows)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'PIX Lote')
-    XLSX.writeFile(wb, `repasses_lote_${fltComp || 'geral'}.csv`)
-    toast(`CSV com ${pendentes.length} repasse(s) gerado!`)
+    const lista = pendentes.map(r => ({ nome: r.nome, chave_pix: r.chave_pix, tipo_pix: r.tipo_pix, valor: r.total_repasse, cpf: r.cpf || '' }))
+    gerarCNAB240(lista, `CI240_001_000001.REM`)
+    toast(`Arquivo .REM com ${pendentes.length} repasse(s) gerado!`)
   }
 
   const semPix = repassesFiltrados.filter(r => r.status !== 'pago' && !r.chave_pix).length
@@ -169,7 +227,7 @@ export function Repasses({ notas, medicos, onRefresh }) {
               title="Data do pagamento" />
           </div>
           <button className="btn btn-outline btn-sm" onClick={gerarCSVLote} title="Gerar CSV para PIX em lote no Inter">
-            📤 CSV Inter (lote)
+            📤 .REM Inter (lote)
           </button>
         </div>
 
@@ -218,7 +276,7 @@ export function Repasses({ notas, medicos, onRefresh }) {
                     <td onClick={e => e.stopPropagation()}>
                       <div style={{ display:'flex', gap:4 }}>
                         {r.chave_pix && r.status !== 'pago' && (
-                          <button className="btn btn-outline btn-xs" onClick={() => gerarCSVInter(r)} title="Gerar CSV PIX Inter">📤</button>
+                          <button className="btn btn-outline btn-xs" onClick={() => gerarCSVInter(r)} title="Gerar arquivo .REM para importar no Inter">📤 .REM</button>
                         )}
                         {r.status !== 'pago' && (
                           <button className="btn btn-primary btn-xs" disabled={loading && pagandoId===r.nome} onClick={() => marcarPago(r.nome)}>

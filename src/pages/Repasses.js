@@ -161,8 +161,7 @@ export function Repasses({ notas, medicos, onRefresh }) {
     linhas.push(ta)
 
     // Download .REM
-    const blob = new Blob([linhas.join('
-')], { type: 'text/plain;charset=ascii' })
+    const blob = new Blob([linhas.join('\r\n')], { type: 'text/plain;charset=ascii' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

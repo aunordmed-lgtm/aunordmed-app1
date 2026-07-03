@@ -19,6 +19,7 @@ import { DRE } from './DRE'
 import { Configuracoes } from './Configuracoes'
 import { ImportacaoNF } from './ImportacaoNF'
 import { ExtratoOFX } from './ExtratoOFX'
+import { Repasses } from './Repasses'
 import { ConferenciaPDF } from './ConferenciaPDF'
 
 async function safeQueryCustom(fn) {
@@ -81,6 +82,7 @@ export function AppLayout() {
           <Route path="/notas" element={<Notas {...props} />} />
           <Route path="/importacao" element={<ImportacaoNF {...props} />} />
           <Route path="/extrato" element={<ExtratoOFX {...props} />} />
+          <Route path="/repasses" element={<Repasses {...props} />} />
           <Route path="/pendencias" element={<Pendencias {...props} />} />
           <Route path="/medicos" element={<Medicos {...props} />} />
           <Route path="/tomadores" element={<Tomadores {...props} />} />

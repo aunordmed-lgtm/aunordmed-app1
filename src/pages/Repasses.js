@@ -98,75 +98,97 @@ export function Repasses({ notas, medicos, onRefresh }) {
 
   // Gerar CNAB 240 (.REM) padrão Banco Inter
   const gerarCNAB240 = (lista, nomeArq) => {
-    const EMPRESA = { cnpj: '60577717000122', nome: '2HT0 LTDA', agencia: '0001', conta: '44349336', digitoConta: '7' }
-    const now = new Date()
-    const pad = (v, n, c='0') => String(v).padStart(n, c)
-    const padL = (v, n) => String(v).padEnd(n, ' ').substring(0, n)
-    const dataPagFmt = dataPag.replace(/-/g,'').replace(/(\d{4})(\d{2})(\d{2})/,'$3$2$1')
-    const dataGer = [pad(now.getDate(),2),pad(now.getMonth()+1,2),now.getFullYear()].join('')
-    const horaGer = [pad(now.getHours(),2),pad(now.getMinutes(),2),pad(now.getSeconds(),2)].join('')
-    const seq = pad(Math.floor(Math.random()*999999)+1, 6)
+    const CNPJ = '60577717000122'
+    const NOME = 'AUNORDMED LTDA          '
+    const AGE  = '00001'
+    const CONT = '000044349336'
+    const DVC  = '7'
+    const now  = new Date()
+    const Z = (v, n) => String(v).padStart(n, '0')
+    const L = (v, n) => String(v||'').toUpperCase().padEnd(n,' ').substring(0,n)
+    const fmt = d => [Z(d.getDate(),2),Z(d.getMonth()+1,2),d.getFullYear()].join('')
+    const dataPagFmt = (() => { const p=dataPag.split('-'); return p[2]+p[1]+p[0] })()
+    const dataGer = fmt(now)
+    const horaGer = [Z(now.getHours(),2),Z(now.getMinutes(),2),Z(now.getSeconds(),2)].join('')
     const linhas = []
+    const fix240 = s => s.length < 240 ? s + ' '.repeat(240-s.length) : s.substring(0,240)
 
-    // Header arquivo
-    let h = '077' + '0000' + '0' + ' '.repeat(9) + '2' + EMPRESA.cnpj.padStart(14,'0')
-    h += ' '.repeat(20) + EMPRESA.agencia.padStart(5,'0') + ' ' + EMPRESA.conta.padStart(12,'0') + EMPRESA.digitoConta + ' '
-    h += padL(EMPRESA.nome, 30) + padL('BANCO INTER S.A.', 30) + ' '.repeat(10)
-    h += '1' + dataGer + horaGer + seq + '103' + '01600' + ' '.repeat(49)
-    linhas.push(h)
+    // ── HEADER ARQUIVO ──────────────────────────────────────────────────────
+    let h = '077'+'0000'+'0'+'         '+'2'+CNPJ
+    h += '                    '   // convênio 20
+    h += AGE+' '+CONT+DVC+' '    // agência+DV+conta+DV+DVag
+    h += L(NOME,30)+L('BANCO INTER S.A.',30)+'          '
+    h += '1'+dataGer+horaGer+'000001'+'103'+'01600'
+    h += '                    '+'                    '+'                             '
+    linhas.push(fix240(h))
 
-    // Header lote
-    let hl = '077' + '0001' + '1' + 'C' + '45' + '45' + '046' + ' ' + '2' + EMPRESA.cnpj.padStart(14,'0')
-    hl += ' '.repeat(20) + EMPRESA.agencia.padStart(5,'0') + ' ' + EMPRESA.conta.padStart(12,'0') + EMPRESA.digitoConta + ' '
-    hl += padL(EMPRESA.nome, 30) + ' '.repeat(40) + ' '.repeat(30) + ' '.repeat(30) + ' '.repeat(8)
-    linhas.push(hl)
+    // ── HEADER LOTE ─────────────────────────────────────────────────────────
+    let hl = '077'+'0001'+'1'+'C'+'45'+'45'+'046'+' '+'2'+CNPJ
+    hl += '                    '+AGE+' '+CONT+DVC+' '
+    hl += L(NOME,30)
+    hl += '                                        ' // finalidade 40
+    hl += '                              '           // histórico 30
+    hl += '                              '           // endereço 30
+    linhas.push(fix240(hl))
 
     let seqReg = 1
-    const tipoMap = { cpf:'1', cnpj:'2', email:'3', telefone:'4', aleatoria:'5', aleatorio:'5' }
+    const tipoMap = {cpf:'1',cnpj:'2',email:'3',telefone:'4',aleatoria:'5',aleatorio:'5',chave:'5'}
 
     lista.forEach(med => {
-      const valorCents = pad(Math.round(med.valor * 100), 15)
-      const nomeFav = padL(med.nome.toUpperCase(), 30)
-      const tipoChave = tipoMap[(med.tipo_pix||'cpf').toLowerCase()] || '1'
-      const chave = padL(med.chave_pix || '', 77)
-      const cpf = (med.cpf || '').replace(/\D/g,'').padStart(14,'0')
+      const vlr = Z(Math.round((med.valor||0)*100), 15)
+      const nomFav = L(med.nome, 30)
+      const tChave = tipoMap[(med.tipo_pix||'cpf').toLowerCase()] || '1'
+      const chave = L(med.chave_pix||'', 77)
+      const cpfN = (med.cpf||'00000000000').replace(/\D/g,'').padStart(14,'0')
+      const tipInsc = cpfN.replace(/^0+/,'').length <= 11 ? '1' : '2'
 
       // Segmento A
-      let sa = '077' + '0001' + '3' + pad(seqReg,5) + 'A' + ' ' + '00'
-      sa += '077' + '00001' + ' ' + ' '.repeat(12) + ' ' + ' ' + nomeFav
-      sa += ' '.repeat(20) + dataPagFmt + 'BRL' + ' '.repeat(15) + valorCents
-      sa += ' '.repeat(20) + ' '.repeat(8) + '0'.repeat(15) + ' '.repeat(20) + '09' + ' ' + ' '.repeat(2) + ' '.repeat(3) + '0' + ' '.repeat(37)
-      linhas.push(sa)
+      let sa = '077'+'0001'+'3'+Z(seqReg,5)+'A'+' '+'00'
+      sa += '077'+'00001'+' '+'            '+' '+' '  // banco+ag+DV+conta+DV+DVag
+      sa += nomFav
+      sa += '                    '   // nº doc empresa 20
+      sa += dataPagFmt+'BRL'+'000000000000000'+vlr
+      sa += '                    '   // nº doc banco 20
+      sa += '00000000'               // data real efetivação 8
+      sa += '000000000000000'        // valor real 15
+      sa += '                    '   // outras info 20
+      sa += '09'+'0'+'  '+'   '+'0' // finalidade+TED+compl+banco+aviso
+      linhas.push(fix240(sa))
       seqReg++
 
       // Segmento B
-      let sb = '077' + '0001' + '3' + pad(seqReg,5) + 'B' + ' '.repeat(3)
-      sb += (cpf.length > 11 ? '2' : '1') + cpf + ' '.repeat(30) + ' '.repeat(8)
-      sb += '0'.repeat(15) + '0'.repeat(15) + '0'.repeat(15) + '0'.repeat(15) + '0'.repeat(15)
-      sb += ' '.repeat(15) + tipoChave + chave + ' '.repeat(2)
-      linhas.push(sb)
+      let sb = '077'+'0001'+'3'+Z(seqReg,5)+'B'+'   '
+      sb += tipInsc+cpfN
+      sb += '                              '  // endereço 30
+      sb += '        '                         // data venc 8
+      sb += '000000000000000'                  // valor doc 15
+      sb += '000000000000000'                  // abatimento 15
+      sb += '000000000000000'                  // desconto 15
+      sb += '000000000000000'                  // mora 15
+      sb += '000000000000000'                  // multa 15
+      sb += '               '                  // nº doc fav 15
+      sb += tChave+chave
+      linhas.push(fix240(sb))
       seqReg++
     })
 
-    // Trailer lote
+    // ── TRAILER LOTE ────────────────────────────────────────────────────────
     const qtdLote = lista.length * 2 + 2
-    const totalValor = pad(Math.round(lista.reduce((a,m) => a+m.valor,0)*100), 18)
-    let tl = '077' + '0001' + '5' + ' '.repeat(9)
-    tl += pad(qtdLote,6) + pad(lista.length,6) + '0'.repeat(17) + pad(lista.length,6) + totalValor + ' '.repeat(170)
-    linhas.push(tl)
+    const totVal = Z(Math.round(lista.reduce((a,m)=>a+(m.valor||0),0)*100), 18)
+    let tl = '077'+'0001'+'5'+'         '
+    tl += Z(qtdLote,6)+Z(lista.length,6)+'0'.repeat(17)+Z(lista.length,6)+totVal
+    linhas.push(fix240(tl))
 
-    // Trailer arquivo
-    const qtdTotal = linhas.length + 1
-    let ta = '077' + '9999' + '9' + ' '.repeat(9) + '000001' + pad(qtdTotal,6) + '000000' + ' '.repeat(205)
-    linhas.push(ta)
+    // ── TRAILER ARQUIVO ──────────────────────────────────────────────────────
+    const qtdTot = linhas.length + 1
+    let ta = '077'+'9999'+'9'+'         '+'000001'+Z(qtdTot,6)+'000000'
+    linhas.push(fix240(ta))
 
-    // Download .REM
+    // Download
     const blob = new Blob([linhas.join('\r\n')], { type: 'text/plain;charset=ascii' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
-    a.download = nomeArq
-    a.click()
+    a.href = url; a.download = nomeArq; a.click()
     URL.revokeObjectURL(url)
   }
 

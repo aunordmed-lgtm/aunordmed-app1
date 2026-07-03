@@ -14,6 +14,7 @@ const navItems = [
   { path: '/pendencias', icon: '🔔', label: 'Pendências', badge: 'pend' },
   { section: 'Financeiro' },
   { path: '/fluxo-caixa', icon: '💰', label: 'Fluxo de caixa' },
+  { path: '/repasses', icon: '💸', label: 'Repasses' },
   { path: '/contas', icon: '📅', label: 'Contas', badge: 'contas', badgeColor: 'blue' },
   { path: '/adiantamentos', icon: '💵', label: 'Adiantamentos', badge: 'adt', badgeColor: 'orange' },
   { path: '/cashback', icon: '🎁', label: 'Cashback', badge: 'cb', badgeColor: 'purple' },

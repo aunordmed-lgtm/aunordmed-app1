@@ -1,0 +1,292 @@
+import { useState, useMemo } from 'react'
+import { supabase } from '../lib/supabase'
+import { useToast } from '../components/Toast'
+import { brl, fmtMes, fmtData } from '../lib/helpers'
+import * as XLSX from 'xlsx'
+
+export function Repasses({ notas, medicos, onRefresh }) {
+  const { toast } = useToast()
+  const [loading, setLoading] = useState(false)
+  const [fltComp, setFltComp] = useState('')
+  const [fltStatus, setFltStatus] = useState('pendente') // pendente | pago | todos
+  const [expandido, setExpandido] = useState(null)
+  const [pagandoId, setPagandoId] = useState(null)
+  const [dataPag, setDataPag] = useState(new Date().toISOString().split('T')[0])
+
+  const comps = useMemo(() => [...new Set(notas.map(n => n.comp).filter(Boolean))].sort().reverse(), [notas])
+
+  // Montar relação de repasses por médico
+  const repasses = useMemo(() => {
+    const mapa = {}
+
+    notas.forEach(nota => {
+      if (!nota.medicos_nota?.length) return
+      // Filtro por competência
+      if (fltComp && nota.comp !== fltComp) return
+
+      nota.medicos_nota.forEach(mn => {
+        const key = mn.nome
+        if (!mapa[key]) {
+          const medCad = medicos.find(m => m.nome === mn.nome)
+          mapa[key] = {
+            nome: mn.nome,
+            crm: mn.crm || medCad?.crm || '',
+            chave_pix: medCad?.chave_pix || '',
+            tipo_pix: medCad?.tipo_pix || '',
+            retencao: mn.retencao_individual || medCad?.retencao || 13,
+            notas: [],
+            total_bruto: 0,
+            total_repasse: 0,
+            status: 'pendente'
+          }
+        }
+        const repasse = mn.repasse || (mn.valor_bruto_medico * (1 - (mn.retencao_individual || 13) / 100))
+        mapa[key].notas.push({
+          id: nota.id,
+          nf: nota.nf,
+          tomador: nota.tomador,
+          comp: nota.comp,
+          status_nota: nota.status,
+          valor_bruto_medico: mn.valor_bruto_medico || 0,
+          retencao: mn.retencao_individual || 13,
+          repasse,
+          status_repasse: nota.status === 'Paga ao médico' ? 'pago' : 'pendente'
+        })
+        mapa[key].total_bruto += mn.valor_bruto_medico || 0
+        mapa[key].total_repasse += repasse
+      })
+    })
+
+    // Calcular status geral do médico
+    Object.values(mapa).forEach(m => {
+      const todosPagos = m.notas.every(n => n.status_repasse === 'pago')
+      const algumPago = m.notas.some(n => n.status_repasse === 'pago')
+      m.status = todosPagos ? 'pago' : algumPago ? 'parcial' : 'pendente'
+    })
+
+    return Object.values(mapa).sort((a, b) => b.total_repasse - a.total_repasse)
+  }, [notas, medicos, fltComp])
+
+  const repassesFiltrados = useMemo(() => {
+    if (fltStatus === 'todos') return repasses
+    if (fltStatus === 'pendente') return repasses.filter(r => r.status !== 'pago')
+    return repasses.filter(r => r.status === fltStatus)
+  }, [repasses, fltStatus])
+
+  const totais = useMemo(() => repassesFiltrados.reduce((a, r) => ({
+    bruto: a.bruto + r.total_bruto,
+    repasse: a.repasse + r.total_repasse,
+    count: a.count + 1
+  }), { bruto: 0, repasse: 0, count: 0 }), [repassesFiltrados])
+
+  const marcarPago = async (nomeMedico) => {
+    if (!window.confirm(`Marcar todas as notas de ${nomeMedico} como "Paga ao médico"?`)) return
+    setLoading(true)
+    setPagandoId(nomeMedico)
+    try {
+      const medRepasse = repasses.find(r => r.nome === nomeMedico)
+      const idsNotas = medRepasse.notas.filter(n => n.status_repasse === 'pendente').map(n => n.id)
+      for (const id of idsNotas) {
+        await supabase.from('notas_fiscais').update({ status: 'Paga ao médico' }).eq('id', id)
+      }
+      toast(`Repasse de ${nomeMedico} marcado como pago!`)
+      onRefresh()
+    } catch(e) { toast('Erro: ' + e.message, 'error') }
+    setLoading(false)
+    setPagandoId(null)
+  }
+
+  const gerarCSVInter = (medico) => {
+    if (!medico.chave_pix) { toast('Médico sem chave PIX cadastrada!', 'error'); return }
+    const rows = [
+      ['tipo_pagamento','nome_favorecido','chave_pix','tipo_chave','valor','data_pagamento','descricao'],
+      ['PIX', medico.nome, medico.chave_pix, (medico.tipo_pix || 'cpf').toUpperCase(),
+       medico.total_repasse.toFixed(2).replace('.', ','),
+       dataPag, `Repasse medico ${fltComp || 'geral'}`]
+    ]
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'PIX')
+    XLSX.writeFile(wb, `repasse_${medico.nome.split(' ')[0]}_${fltComp || 'geral'}.csv`)
+    toast('CSV Inter gerado!')
+  }
+
+  const gerarCSVLote = () => {
+    const pendentes = repassesFiltrados.filter(r => r.status !== 'pago' && r.chave_pix)
+    if (!pendentes.length) { toast('Nenhum médico com PIX cadastrado para repasse.', 'error'); return }
+    const rows = [['tipo_pagamento','nome_favorecido','chave_pix','tipo_chave','valor','data_pagamento','descricao']]
+    pendentes.forEach(r => rows.push([
+      'PIX', r.nome, r.chave_pix, (r.tipo_pix || 'cpf').toUpperCase(),
+      r.total_repasse.toFixed(2).replace('.', ','),
+      dataPag, `Repasse medico ${fltComp || 'geral'}`
+    ]))
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'PIX Lote')
+    XLSX.writeFile(wb, `repasses_lote_${fltComp || 'geral'}.csv`)
+    toast(`CSV com ${pendentes.length} repasse(s) gerado!`)
+  }
+
+  const semPix = repassesFiltrados.filter(r => r.status !== 'pago' && !r.chave_pix).length
+
+  return (
+    <div className="page-content">
+      {/* KPIs */}
+      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 14 }}>
+        {[
+          { bar:'var(--g5)', ic:'var(--g10)', icon:'👨‍⚕️', label:'Médicos no período', value: repassesFiltrados.length, sub:'' },
+          { bar:'var(--g5)', ic:'var(--g10)', icon:'💰', label:'Total bruto médicos', value: brl(totais.bruto), sub:'' },
+          { bar:'var(--orange)', ic:'var(--orange-l)', icon:'💸', label:'Total a repassar', value: brl(totais.repasse), sub:'Após retenção' },
+          { bar: semPix > 0 ? 'var(--red)' : 'var(--g5)', ic: semPix > 0 ? 'var(--red-l)' : 'var(--g10)', icon: semPix > 0 ? '⚠️' : '✅', label:'Sem PIX cadastrado', value: semPix, sub: semPix > 0 ? 'Verificar cadastro' : 'Todos com PIX' },
+        ].map((k,i) => (
+          <div key={i} className="kpi">
+            <div className="kpi-bar" style={{ background:k.bar }}/>
+            <div className="kpi-icon" style={{ background:k.ic }}>{k.icon}</div>
+            <div className="kpi-label">{k.label}</div>
+            <div className="kpi-value">{k.value}</div>
+            {k.sub && <div className="kpi-sub">{k.sub}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <div className="card">
+        <div className="table-toolbar">
+          <span className="table-title">Repasses por médico</span>
+          <select className="filter-select" value={fltComp} onChange={e => setFltComp(e.target.value)}>
+            <option value="">Todas competências</option>
+            {comps.map(c => <option key={c} value={c}>{fmtMes(c)}</option>)}
+          </select>
+          <select className="filter-select" value={fltStatus} onChange={e => setFltStatus(e.target.value)}>
+            <option value="pendente">Pendentes</option>
+            <option value="pago">Pagos</option>
+            <option value="parcial">Parciais</option>
+            <option value="todos">Todos</option>
+          </select>
+          <div className="field" style={{ marginBottom:0 }}>
+            <input type="date" value={dataPag} onChange={e => setDataPag(e.target.value)}
+              style={{ height:32, fontSize:12, border:'1px solid var(--border)', borderRadius:6, padding:'0 8px' }}
+              title="Data do pagamento" />
+          </div>
+          <button className="btn btn-outline btn-sm" onClick={gerarCSVLote} title="Gerar CSV para PIX em lote no Inter">
+            📤 CSV Inter (lote)
+          </button>
+        </div>
+
+        {semPix > 0 && (
+          <div style={{ margin:'0 0 12px', padding:'10px 16px', background:'var(--yellow-l)', border:'1px solid #FDE68A', borderRadius:'var(--radius-lg)', fontSize:12, color:'var(--yellow)' }}>
+            ⚠️ {semPix} médico(s) sem chave PIX cadastrada — atualize em <strong>Cadastros → Médicos</strong>
+          </div>
+        )}
+
+        <div className="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Médico</th><th>CRM</th><th>Chave PIX</th><th style={{textAlign:'right'}}>Bruto</th><th style={{textAlign:'right'}}>Retenção</th><th style={{textAlign:'right'}}>Repasse</th><th>Notas</th><th>Status</th><th>Ações</th>
+            </tr></thead>
+            <tbody>
+              {repassesFiltrados.length === 0 ? (
+                <tr><td colSpan={9}><div className="empty-state"><div className="empty-icon">💸</div><h4>Nenhum repasse</h4><p>Selecione outro período ou status</p></div></td></tr>
+              ) : repassesFiltrados.map((r, i) => (
+                <>
+                  <tr key={r.nome} style={{ background: r.status==='pago'?'#F0FDF4':i%2===0?'#fff':'var(--n10)', cursor:'pointer' }}
+                    onClick={() => setExpandido(expandido===r.nome ? null : r.nome)}>
+                    <td style={{ fontWeight:600 }}>
+                      <span style={{ marginRight:6, fontSize:11, color:'var(--n5)' }}>{expandido===r.nome?'▼':'▶'}</span>
+                      {r.nome}
+                    </td>
+                    <td style={{ fontSize:11, color:'var(--n5)' }}>{r.crm||'—'}</td>
+                    <td style={{ fontSize:11 }}>
+                      {r.chave_pix
+                        ? <span style={{ background:'var(--g10)', color:'var(--g3)', border:'1px solid var(--g8)', borderRadius:99, fontSize:10, fontWeight:700, padding:'2px 8px' }}>{r.tipo_pix?.toUpperCase()||'PIX'}: {r.chave_pix}</span>
+                        : <span style={{ background:'var(--yellow-l)', color:'var(--yellow)', border:'1px solid #FDE68A', borderRadius:99, fontSize:10, fontWeight:700, padding:'2px 8px' }}>⚠️ Sem PIX</span>
+                      }
+                    </td>
+                    <td className="mono" style={{ textAlign:'right', fontWeight:600 }}>{brl(r.total_bruto)}</td>
+                    <td className="mono" style={{ textAlign:'right', color:'var(--n4)' }}>{r.retencao}%</td>
+                    <td className="mono" style={{ textAlign:'right', fontWeight:700, color: r.status==='pago'?'var(--g3)':'var(--orange-d)', fontSize:14 }}>{brl(r.total_repasse)}</td>
+                    <td className="mono" style={{ textAlign:'center', color:'var(--n5)' }}>{r.notas.length}</td>
+                    <td>
+                      <span style={{ borderRadius:99, fontSize:10, fontWeight:700, padding:'3px 10px',
+                        background: r.status==='pago'?'var(--g10)':r.status==='parcial'?'var(--blue-l)':'var(--yellow-l)',
+                        color: r.status==='pago'?'var(--g3)':r.status==='parcial'?'var(--blue)':'var(--yellow)',
+                        border: `1px solid ${r.status==='pago'?'var(--g8)':r.status==='parcial'?'#BFDBFE':'#FDE68A'}`
+                      }}>
+                        {r.status==='pago'?'✓ Pago':r.status==='parcial'?'⟳ Parcial':'⏳ Pendente'}
+                      </span>
+                    </td>
+                    <td onClick={e => e.stopPropagation()}>
+                      <div style={{ display:'flex', gap:4 }}>
+                        {r.chave_pix && r.status !== 'pago' && (
+                          <button className="btn btn-outline btn-xs" onClick={() => gerarCSVInter(r)} title="Gerar CSV PIX Inter">📤</button>
+                        )}
+                        {r.status !== 'pago' && (
+                          <button className="btn btn-primary btn-xs" disabled={loading && pagandoId===r.nome} onClick={() => marcarPago(r.nome)}>
+                            {loading && pagandoId===r.nome ? <span className="spinner spinner-sm"/> : '✓ Pago'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {/* Linha expandida com notas vinculadas */}
+                  {expandido === r.nome && (
+                    <tr key={r.nome+'_exp'}>
+                      <td colSpan={9} style={{ padding:0, background:'#F8FAFC' }}>
+                        <div style={{ padding:'10px 24px 14px', borderLeft:'3px solid var(--g5)' }}>
+                          <div style={{ fontSize:11, fontWeight:700, color:'var(--n4)', textTransform:'uppercase', letterSpacing:.4, marginBottom:8 }}>
+                            Notas vinculadas ao repasse de {r.nome}
+                          </div>
+                          <table style={{ width:'100%', fontSize:11, borderCollapse:'collapse' }}>
+                            <thead><tr style={{ background:'var(--n9)' }}>
+                              <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--n5)', fontWeight:600 }}>NF</th>
+                              <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--n5)', fontWeight:600 }}>Tomador</th>
+                              <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--n5)', fontWeight:600 }}>Competência</th>
+                              <th style={{ padding:'6px 10px', textAlign:'right', color:'var(--n5)', fontWeight:600 }}>Bruto médico</th>
+                              <th style={{ padding:'6px 10px', textAlign:'center', color:'var(--n5)', fontWeight:600 }}>Retenção</th>
+                              <th style={{ padding:'6px 10px', textAlign:'right', color:'var(--n5)', fontWeight:600 }}>Repasse</th>
+                              <th style={{ padding:'6px 10px', textAlign:'left', color:'var(--n5)', fontWeight:600 }}>Status nota</th>
+                            </tr></thead>
+                            <tbody>
+                              {r.notas.map((n, j) => (
+                                <tr key={j} style={{ background: j%2===0?'#fff':'var(--n10)', borderBottom:'1px solid var(--border)' }}>
+                                  <td style={{ padding:'6px 10px', fontFamily:'var(--mono)', fontWeight:600, color:'var(--g3)' }}>{n.nf}</td>
+                                  <td style={{ padding:'6px 10px' }}>{n.tomador}</td>
+                                  <td style={{ padding:'6px 10px', fontFamily:'var(--mono)' }}>{fmtMes(n.comp)}</td>
+                                  <td style={{ padding:'6px 10px', fontFamily:'var(--mono)', textAlign:'right', fontWeight:600 }}>{brl(n.valor_bruto_medico)}</td>
+                                  <td style={{ padding:'6px 10px', fontFamily:'var(--mono)', textAlign:'center', color:'var(--n4)' }}>{n.retencao}%</td>
+                                  <td style={{ padding:'6px 10px', fontFamily:'var(--mono)', textAlign:'right', fontWeight:700, color:'var(--orange-d)' }}>{brl(n.repasse)}</td>
+                                  <td style={{ padding:'6px 10px' }}>
+                                    <span className={`badge ${n.status_nota==='Paga ao médico'?'badge-ok':n.status_nota==='Recebida'?'badge-rec':'badge-emit'}`}>{n.status_nota}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                              <tr style={{ background:'var(--g1)' }}>
+                                <td colSpan={3} style={{ padding:'6px 10px', fontWeight:700, color:'#fff', fontSize:11 }}>TOTAL</td>
+                                <td style={{ padding:'6px 10px', fontFamily:'var(--mono)', textAlign:'right', fontWeight:700, color:'rgba(255,255,255,.85)' }}>{brl(r.total_bruto)}</td>
+                                <td></td>
+                                <td style={{ padding:'6px 10px', fontFamily:'var(--mono)', textAlign:'right', fontWeight:700, color:'var(--g7)' }}>{brl(r.total_repasse)}</td>
+                                <td></td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Rodapé totais */}
+        {repassesFiltrados.length > 0 && (
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:24, padding:'12px 16px', borderTop:'1px solid var(--border)', fontSize:13 }}>
+            <span>Total bruto: <strong>{brl(totais.bruto)}</strong></span>
+            <span>Total repasses: <strong style={{ color:'var(--orange-d)', fontSize:15 }}>{brl(totais.repasse)}</strong></span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

@@ -9,7 +9,7 @@ import { Medicos } from './Medicos'
 import { Tomadores } from './Tomadores'
 import { Adiantamentos } from './Adiantamentos'
 import { Cashback } from './Cashback'
-import { Comprovantes } from './Comprovantes'
+import { Comprovante } from './Comprovante'
 import { Relatorios } from './Relatorios'
 import { RelatorioGerencial } from './RelatorioGerencial'
 import { FluxoCaixa } from './FluxoCaixa'
@@ -18,9 +18,6 @@ import { Impostos } from './Impostos'
 import { DRE } from './DRE'
 import { Configuracoes } from './Configuracoes'
 import { ImportacaoNF } from './ImportacaoNF'
-import { ExtratoOFX } from './ExtratoOFX'
-import { Repasses } from './Repasses'
-import { ConferenciaPDF } from './ConferenciaPDF'
 
 async function safeQueryCustom(fn) {
   try {
@@ -81,14 +78,12 @@ export function AppLayout() {
           <Route path="/" element={<Dashboard {...props} />} />
           <Route path="/notas" element={<Notas {...props} />} />
           <Route path="/importacao" element={<ImportacaoNF {...props} />} />
-          <Route path="/extrato" element={<ExtratoOFX {...props} />} />
-          <Route path="/repasses" element={<Repasses {...props} />} />
           <Route path="/pendencias" element={<Pendencias {...props} />} />
           <Route path="/medicos" element={<Medicos {...props} />} />
           <Route path="/tomadores" element={<Tomadores {...props} />} />
           <Route path="/adiantamentos" element={<Adiantamentos {...props} />} />
           <Route path="/cashback" element={<Cashback {...props} />} />
-          <Route path="/comprovantes" element={<Comprovantes {...props} />} />
+          <Route path="/comprovantes" element={<Comprovante {...props} />} />
           <Route path="/relatorios" element={<Relatorios {...props} />} />
           <Route path="/relatorio-gerencial" element={<RelatorioGerencial {...props} />} />
           <Route path="/fluxo-caixa" element={<FluxoCaixa {...props} />} />
@@ -96,7 +91,6 @@ export function AppLayout() {
           <Route path="/impostos" element={<Impostos {...props} />} />
           <Route path="/dre" element={<DRE {...props} />} />
           <Route path="/configuracoes" element={<Configuracoes {...props} />} />
-          <Route path="/conferencia-pdf" element={<ConferenciaPDF {...props} />} />
         </Routes>
       </div>
     </div>

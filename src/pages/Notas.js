@@ -252,6 +252,34 @@ export function Notas({ notas, medicos, onRefresh }) {
     onRefresh()
   }
 
+  const gerarComprovante = async (nota) => {
+    if (!nota.medicos_nota?.length) { toast('Esta nota não tem médicos vinculados.', 'error'); return }
+    setLoading(true)
+    let gerados = 0
+    for (const mn of nota.medicos_nota) {
+      try {
+        const med = medicos.find(m => m.nome === mn.nome)
+        const repasse = mn.repasse || (mn.valor_bruto_medico * (1 - (mn.retencao_individual || 13) / 100))
+        // Verificar se já existe comprovante para essa nota + médico
+        const { data: exist } = await supabase.from('comprovantes').select('id').eq('nf_id', nota.id).eq('medico_nome', mn.nome).maybeSingle()
+        if (exist) { toast(`Comprovante de ${mn.nome} já existe.`, 'error'); continue }
+        await supabase.from('comprovantes').insert({
+          token: uid(),
+          nf_id: nota.id,
+          medico_nome: mn.nome,
+          medico_crm: mn.crm || med?.crm || null,
+          tomador: nota.tomador,
+          valor_repasse: repasse,
+          competencia: nota.comp || null,
+          dados_extras: { nf: nota.nf, pix: med?.chave_pix, tipo_pix: med?.tipo_pix }
+        })
+        gerados++
+      } catch(e) {}
+    }
+    setLoading(false)
+    if (gerados > 0) { toast(`${gerados} comprovante(s) gerado(s) com sucesso!`); onRefresh() }
+  }
+
   const exportarRelatorio = () => {
     const rows = [['NF','Tomador','Médicos','Competência','Bruto','Recebido','Repasse','Margem','% Margem','Status']]
     notasRel.forEach(n => rows.push([n.nf, n.tomador, n.nomes_medicos, fmtMes(n.comp), +(n.bruto||0).toFixed(2), +(n.recebido||0).toFixed(2), +(n.total_repasse||0).toFixed(2), +(n.margem||0).toFixed(2), +((n.pct_margem||0)*100).toFixed(2)+'%', n.status]))
@@ -371,6 +399,8 @@ export function Notas({ notas, medicos, onRefresh }) {
                     </td>
                     <td style={{ display:'flex', gap:4, paddingTop:6 }}>
                       <button className="btn btn-ghost btn-xs" onClick={() => abrirEditar(n)}>✏️</button>
+                      <button className="btn btn-outline btn-xs" style={{ fontSize:10, color:'var(--g3)', borderColor:'var(--g8)' }}
+                        onClick={() => gerarComprovante(n)} title="Gerar comprovante para os médicos vinculados">🧾</button>
                       <button className="btn btn-danger btn-xs" onClick={() => excluir(n.id)}>✕</button>
                     </td>
                   </tr>

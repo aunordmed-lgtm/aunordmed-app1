@@ -1,4 +1,6 @@
 import { useMemo, useState, useRef } from 'react'
+import { supabase } from '../lib/supabase'
+import { useToast } from '../components/Toast'
 
 const brl = v => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtMes = m => {
@@ -72,67 +74,59 @@ function normalizar(s) {
   return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 }
 
-// Cruza débitos do extrato (dinheiro saindo p/ médicos) com comprovantes já lançados
-function cruzarDebitosComComprovantes(transacoes, comprovantes) {
+// Cruza débitos do extrato com os médicos de cada nota fiscal ainda não marcada como "Paga ao médico"
+function cruzarDebitosComNotas(transacoes, notas) {
   const MARGEM = 0.02
   const debitos = transacoes.filter(t => t.tipo === 'debito')
-  const usados = new Set()
+  const usados = new Set() // índices de transações já usadas em algum match
 
-  const linhas = debitos.map(t => {
-    const valorAbs = Math.abs(t.valor)
-    const nomeNorm = normalizar(t.nome || t.memo)
+  const notasRelevantes = notas.filter(n => n.status !== 'Paga ao médico' && (n.medicos_nota || []).length)
 
-    // candidatos por valor dentro da margem
-    const candidatos = comprovantes
-      .map((c, idx) => ({ c, idx }))
-      .filter(({ c, idx }) => {
-        if (usados.has(idx)) return false
-        const diff = Math.abs((c.valor_repasse || 0) - valorAbs)
-        return diff <= Math.max(MARGEM, valorAbs * 0.005)
-      })
+  const resultado = notasRelevantes.map(nota => {
+    const medicosStatus = (nota.medicos_nota || []).map(mn => {
+      const valorAlvo = mn.repasse || 0
+      const nomeAlvoNorm = normalizar(mn.nome).split(' ')[0]
 
-    let melhor = null
-    if (candidatos.length === 1) {
-      melhor = candidatos[0]
-    } else if (candidatos.length > 1) {
-      // desempate: nome do médico aparece na descrição do banco
-      melhor = candidatos.find(({ c }) => nomeNorm.includes(normalizar(c.medico_nome).split(' ')[0])) || candidatos[0]
-    }
+      const candidatos = debitos
+        .map((t, idx) => ({ t, idx }))
+        .filter(({ t, idx }) => !usados.has(idx) && Math.abs(Math.abs(t.valor) - valorAlvo) <= Math.max(MARGEM, valorAlvo * 0.005))
 
-    if (melhor) usados.add(melhor.idx)
-    const comp = melhor?.c || null
-
-    let status = 'sem_comprovante'
-    let diffDias = null
-    if (comp) {
-      if (comp.data_pagamento && t.data) {
-        const d1 = new Date(comp.data_pagamento), d2 = new Date(t.data)
-        diffDias = Math.round((d2 - d1) / 86400000)
-        status = diffDias === 0 ? 'ok' : 'data_divergente'
-      } else {
-        status = 'sem_data_sistema'
+      let melhor = null
+      if (candidatos.length === 1) melhor = candidatos[0]
+      else if (candidatos.length > 1) {
+        melhor = candidatos.find(({ t }) => normalizar(t.nome || t.memo).includes(nomeAlvoNorm)) || candidatos[0]
       }
+
+      if (melhor) usados.add(melhor.idx)
+
+      return {
+        nome: mn.nome,
+        valor: valorAlvo,
+        transacao: melhor?.t || null,
+        pago: !!melhor,
+      }
+    })
+
+    const totalMedicos = medicosStatus.length
+    const pagos = medicosStatus.filter(m => m.pago).length
+
+    return {
+      nota, medicosStatus, totalMedicos, pagos,
+      completo: totalMedicos > 0 && pagos === totalMedicos,
     }
+  }).filter(r => r.pagos > 0) // só mostra notas com pelo menos 1 médico identificado no extrato
 
-    return { transacao: t, comprovante: comp, status, diffDias }
-  })
-
-  // Comprovantes dentro do período do extrato que não bateram com nenhuma transação
-  const datasExtrato = transacoes.map(t => t.data).filter(Boolean).sort()
-  const dataMin = datasExtrato[0], dataMax = datasExtrato[datasExtrato.length - 1]
-  const orfaos = comprovantes
-    .map((c, idx) => ({ c, idx }))
-    .filter(({ c, idx }) => !usados.has(idx) && c.data_pagamento && dataMin && dataMax && c.data_pagamento >= dataMin && c.data_pagamento <= dataMax)
-    .map(({ c }) => c)
-
-  return { linhas, orfaos }
+  resultado.sort((a, b) => (b.completo - a.completo) || (b.pagos / b.totalMedicos - a.pagos / a.totalMedicos))
+  return resultado
 }
 
-function AbaExtratoOFX({ comprovantes = [] }) {
+function AbaExtratoOFX({ notas = [], onRefresh }) {
+  const { toast } = useToast()
   const [loading, setLoading] = useState(false)
-  const [transacoes, setTransacoes] = useState([])
+  const [dandoBaixa, setDandoBaixa] = useState(false)
   const [cruzamento, setCruzamento] = useState(null)
-  const [filtroStatus, setFiltroStatus] = useState('todos')
+  const [selecionadas, setSelecionadas] = useState(new Set())
+  const [expandida, setExpandida] = useState(null)
   const fileRef = useRef()
 
   async function processarArquivo(file) {
@@ -142,24 +136,45 @@ function AbaExtratoOFX({ comprovantes = [] }) {
       const decoder = new TextDecoder('iso-8859-1')
       const text = decoder.decode(buffer)
       const trans = parseOFX(text)
-      if (!trans.length) { alert('Nenhuma transação encontrada no extrato.'); setLoading(false); return }
-      setTransacoes(trans)
-      setCruzamento(cruzarDebitosComComprovantes(trans, comprovantes))
+      if (!trans.length) { toast('Nenhuma transação encontrada no extrato.', 'error'); setLoading(false); return }
+      const cruz = cruzarDebitosComNotas(trans, notas)
+      setCruzamento(cruz)
+      setSelecionadas(new Set(cruz.map((r, i) => r.completo ? i : -1).filter(i => i >= 0)))
+      toast(`${trans.length} transação(ões) no extrato · ${cruz.filter(r => r.completo).length} nota(s) totalmente conferida(s)`)
     } catch (e) {
-      alert('Erro ao processar o extrato: ' + e.message)
+      toast('Erro ao processar o extrato: ' + e.message, 'error')
     }
     setLoading(false)
   }
 
-  function reiniciar() { setTransacoes([]); setCruzamento(null); if (fileRef.current) fileRef.current.value = '' }
+  function reiniciar() { setCruzamento(null); setSelecionadas(new Set()); if (fileRef.current) fileRef.current.value = '' }
+  function toggleSel(i) { setSelecionadas(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n }) }
+
+  async function darBaixa() {
+    const sels = cruzamento.filter((_, i) => selecionadas.has(i))
+    if (!sels.length) { toast('Selecione ao menos uma nota completa.', 'error'); return }
+    setDandoBaixa(true)
+    let sucesso = 0, falhas = 0
+    for (const item of sels) {
+      try {
+        await supabase.from('notas_fiscais').update({ status: 'Paga ao médico' }).eq('id', item.nota.id)
+        sucesso++
+      } catch (e) { falhas++ }
+    }
+    setDandoBaixa(false)
+    toast(`${sucesso} nota(s) marcada(s) como "Paga ao médico"${falhas ? ` · ${falhas} falha(s)` : ''}`)
+    if (onRefresh) onRefresh()
+    reiniciar()
+  }
 
   if (!cruzamento) {
     return (
       <div>
         <div style={{ ...cardStyle, padding: '18px 22px', marginBottom: 16, background: 'linear-gradient(135deg, #EBF5FF, #F0F9FF)', border: '1px solid #BFDBFE' }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: G.g2, marginBottom: 6 }}>🏦 Cruzamento de repasses pagos com o extrato bancário</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: G.g2, marginBottom: 6 }}>🏦 Baixa automática de notas via extrato bancário</div>
           <div style={{ fontSize: 12, color: GRAY[2], lineHeight: 1.5 }}>
-            Envie o mesmo arquivo OFX exportado do banco. O sistema pega os <strong>débitos</strong> (pagamentos feitos a médicos) e compara com a <strong>data de pagamento</strong> registrada em cada comprovante, por valor — sinalizando datas divergentes ou pagamentos que aparecem no banco mas não foram lançados como comprovante.
+            Envie o extrato OFX do banco. O sistema pega os <strong>débitos</strong> (pagamentos a médicos) e casa cada um com o valor de repasse de cada médico dentro das notas fiscais ainda não marcadas como pagas.
+            Quando <strong>todos os médicos de uma nota</strong> tiverem pagamento identificado no extrato, ela fica disponível pra você confirmar a baixa (status muda para <strong>"Paga ao médico"</strong>). Notas com pagamento parcial aparecem, mas não são marcadas — assim nenhuma nota é dada como paga antes da hora.
           </div>
         </div>
         <div
@@ -179,108 +194,101 @@ function AbaExtratoOFX({ comprovantes = [] }) {
     )
   }
 
-  const { linhas, orfaos } = cruzamento
-  const ok = linhas.filter(l => l.status === 'ok').length
-  const divergentes = linhas.filter(l => l.status === 'data_divergente').length
-  const semComprovante = linhas.filter(l => l.status === 'sem_comprovante').length
-  const semData = linhas.filter(l => l.status === 'sem_data_sistema').length
-
-  const linhasFiltradas = linhas.filter(l => filtroStatus === 'todos' || l.status === filtroStatus)
+  const completas = cruzamento.filter(r => r.completo).length
+  const parciais = cruzamento.filter(r => !r.completo).length
 
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
-        <Kpi label="Datas OK" value={ok} sub="banco = sistema" color={G.g2} />
-        <Kpi label="Datas divergentes" value={divergentes} sub="banco ≠ sistema" color={ORANGE} />
-        <Kpi label="Sem comprovante" value={semComprovante} sub="pago no banco, não lançado" color={RED} />
-        <Kpi label="Sem match no banco" value={orfaos.length} sub="lançado, não achado no extrato" color={GRAY[3]} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
+        <Kpi label="Notas totalmente conferidas" value={completas} sub="todos os médicos pagos" color={G.g2} />
+        <Kpi label="Notas com pagamento parcial" value={parciais} sub="alguns médicos ainda sem match" color={ORANGE} />
+        <Kpi label="Selecionadas para baixa" value={selecionadas.size} sub="serão marcadas como pagas" />
       </div>
 
-      <div style={{ ...cardStyle, padding: '14px 20px', marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label style={{ ...labelStyle, marginBottom: 0 }}>Mostrar</label>
-        <select style={inputStyle} value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}>
-          <option value="todos">Todos ({linhas.length})</option>
-          <option value="ok">✓ Datas OK ({ok})</option>
-          <option value="data_divergente">⚠ Datas divergentes ({divergentes})</option>
-          <option value="sem_comprovante">❌ Sem comprovante ({semComprovante})</option>
-          {semData > 0 && <option value="sem_data_sistema">Sem data no sistema ({semData})</option>}
-        </select>
+      <div style={{ ...cardStyle, padding: '14px 20px', marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button style={btnGhost} onClick={reiniciar}>← Voltar</button>
         <div style={{ flex: 1 }} />
-        <button style={btnGhost} onClick={reiniciar}>⬆ Importar outro extrato</button>
+        <button style={{ ...btnPrimary, opacity: dandoBaixa || !selecionadas.size ? 0.6 : 1 }} onClick={darBaixa} disabled={dandoBaixa || !selecionadas.size}>
+          {dandoBaixa ? 'Processando…' : `✓ Dar baixa em ${selecionadas.size} nota(s)`}
+        </button>
       </div>
 
-      <div style={{ ...cardStyle, overflow: 'hidden', marginBottom: 16 }}>
+      <div style={{ ...cardStyle, overflow: 'hidden' }}>
         <div style={{ padding: '14px 20px', borderBottom: '1px solid #D4E6DA', fontSize: 13, fontWeight: 600, color: GRAY[0] }}>
-          Débitos do extrato × comprovantes ({linhasFiltradas.length})
+          Notas identificadas no extrato ({cruzamento.length})
         </div>
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 780 }}>
             <thead><tr style={{ background: G.g1 }}>
-              <th style={thStyle}>Data (banco)</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Valor (banco)</th>
-              <th style={thStyle}>Descrição banco</th>
-              <th style={thStyle}>Médico (comprovante)</th>
-              <th style={thStyle}>Data (sistema)</th>
-              <th style={{ ...thStyle, textAlign: 'center' }}>Diferença</th>
+              <th style={thStyle}></th>
+              <th style={thStyle}>NF</th>
+              <th style={thStyle}>Tomador</th>
+              <th style={thStyle}>Competência</th>
+              <th style={{ ...thStyle, textAlign: 'center' }}>Médicos pagos</th>
               <th style={{ ...thStyle, textAlign: 'center' }}>Status</th>
+              <th style={{ ...thStyle, textAlign: 'center' }}></th>
             </tr></thead>
             <tbody>
-              {linhasFiltradas.length === 0 && (
-                <tr><td colSpan={7} style={{ ...tdStyle, textAlign: 'center', color: GRAY[3], padding: 30 }}>Nenhum item para esse filtro.</td></tr>
-              )}
-              {linhasFiltradas.map((l, i) => (
-                <tr key={i}>
-                  <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{fmtDt(l.transacao.data)}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>R$ {brl(Math.abs(l.transacao.valor))}</td>
-                  <td style={{ ...tdStyle, whiteSpace: 'normal', maxWidth: 220, fontSize: 11, color: GRAY[2] }} title={l.transacao.memo}>{l.transacao.memo || '—'}</td>
-                  <td style={{ ...tdStyle, whiteSpace: 'normal', fontWeight: 600 }}>{l.comprovante?.medico_nome || '—'}</td>
-                  <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{l.comprovante ? fmtDt(l.comprovante.data_pagamento) : '—'}</td>
-                  <td style={{ ...tdStyle, textAlign: 'center', fontFamily: 'monospace' }}>{l.diffDias !== null ? `${l.diffDias > 0 ? '+' : ''}${l.diffDias}d` : '—'}</td>
-                  <td style={{ ...tdStyle, textAlign: 'center' }}>
-                    {l.status === 'ok' && <span style={badge(G.g7, G.g2, G.g6)}>✓ OK</span>}
-                    {l.status === 'data_divergente' && <span style={badge('#FFFBEB', ORANGE, '#FDE68A')}>⚠ Divergente</span>}
-                    {l.status === 'sem_comprovante' && <span style={badge('#FEF2F2', RED, '#FECACA')}>❌ Sem comprovante</span>}
-                    {l.status === 'sem_data_sistema' && <span style={badge(GRAY[6], GRAY[2], GRAY[5])}>Sem data cadastrada</span>}
-                  </td>
-                </tr>
+              {cruzamento.map((r, i) => (
+                <>
+                  <tr key={i} style={{ background: r.completo ? '#F0FDF4' : '#FFFBEB' }}>
+                    <td style={tdStyle}>
+                      {r.completo && <input type="checkbox" checked={selecionadas.has(i)} onChange={() => toggleSel(i)} />}
+                    </td>
+                    <td style={{ ...tdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{r.nota.nf || '—'}</td>
+                    <td style={{ ...tdStyle, whiteSpace: 'normal', maxWidth: 220 }}>{r.nota.tomador || '—'}</td>
+                    <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{fmtMes(r.nota.comp)}</td>
+                    <td style={{ ...tdStyle, textAlign: 'center', fontFamily: 'monospace', fontWeight: 700 }}>{r.pagos}/{r.totalMedicos}</td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
+                      {r.completo
+                        ? <span style={badge(G.g7, G.g2, G.g6)}>✓ Completa</span>
+                        : <span style={badge('#FFFBEB', ORANGE, '#FDE68A')}>Parcial</span>}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
+                      <button onClick={() => setExpandida(expandida === i ? null : i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: G.g3, fontSize: 12, fontWeight: 600 }}>
+                        {expandida === i ? 'Ocultar' : 'Ver médicos'}
+                      </button>
+                    </td>
+                  </tr>
+                  {expandida === i && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: 0, borderBottom: '1px solid ' + GRAY[6] }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', background: GRAY[6] }}>
+                          <thead><tr>
+                            <th style={{ ...thStyle, background: 'transparent', color: GRAY[2] }}>Médico</th>
+                            <th style={{ ...thStyle, background: 'transparent', color: GRAY[2], textAlign: 'right' }}>Repasse esperado</th>
+                            <th style={{ ...thStyle, background: 'transparent', color: GRAY[2] }}>Data no banco</th>
+                            <th style={{ ...thStyle, background: 'transparent', color: GRAY[2], textAlign: 'center' }}>Status</th>
+                          </tr></thead>
+                          <tbody>
+                            {r.medicosStatus.map((m, j) => (
+                              <tr key={j}>
+                                <td style={{ ...tdStyle, whiteSpace: 'normal' }}>{m.nome}</td>
+                                <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>R$ {brl(m.valor)}</td>
+                                <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{m.transacao ? fmtDt(m.transacao.data) : '—'}</td>
+                                <td style={{ ...tdStyle, textAlign: 'center' }}>
+                                  {m.pago
+                                    ? <span style={badge(G.g7, G.g2, G.g6)}>✓ Encontrado</span>
+                                    : <span style={badge('#FEF2F2', RED, '#FECACA')}>❌ Não encontrado</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>
         </div>
       </div>
-
-      {orfaos.length > 0 && (
-        <div style={{ ...cardStyle, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #D4E6DA', fontSize: 13, fontWeight: 600, color: GRAY[0] }}>
-            Comprovantes lançados no período, sem transação correspondente no extrato ({orfaos.length})
-          </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 600 }}>
-              <thead><tr style={{ background: G.g1 }}>
-                <th style={thStyle}>Médico</th>
-                <th style={thStyle}>Data (sistema)</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Valor</th>
-                <th style={thStyle}>Tomador</th>
-              </tr></thead>
-              <tbody>
-                {orfaos.map((c, i) => (
-                  <tr key={i}>
-                    <td style={{ ...tdStyle, fontWeight: 600, whiteSpace: 'normal' }}>{c.medico_nome}</td>
-                    <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{fmtDt(c.data_pagamento)}</td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>R$ {brl(c.valor_repasse)}</td>
-                    <td style={{ ...tdStyle, whiteSpace: 'normal' }}>{c.tomador || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
 
-export function RegimeCaixa({ notas = [], comprovantes = [], medicos = [], tomadores = [] }) {
+export function RegimeCaixa({ notas = [], comprovantes = [], medicos = [], tomadores = [], onRefresh }) {
   const [aba, setAba] = useState('caixa')
   const [fMedico, setFMedico] = useState('')
   const [fComp, setFComp] = useState('')
@@ -391,7 +399,7 @@ export function RegimeCaixa({ notas = [], comprovantes = [], medicos = [], tomad
         </div>
 
         {aba === 'ofx' ? (
-          <AbaExtratoOFX comprovantes={comprovantes} />
+          <AbaExtratoOFX notas={notas} onRefresh={onRefresh} />
         ) : (
           <>
             <div style={{ ...cardStyle, padding: '16px 20px', marginBottom: 16, display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>

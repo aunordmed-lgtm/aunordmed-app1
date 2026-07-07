@@ -19,6 +19,7 @@ import { Impostos } from './Impostos'
 import { DRE } from './DRE'
 import { Configuracoes } from './Configuracoes'
 import { ImportacaoNF } from './ImportacaoNF'
+import { RegimeCaixa } from './RegimeCaixa'
 import { Repasses } from './Repasses'
 import { ConferenciaPDF } from './ConferenciaPDF'
 import { ExtratoOFX } from './ExtratoOFX'
@@ -90,6 +91,7 @@ export function AppLayout() {
           <Route path="/comprovantes" element={<Comprovantes {...props} />} />
           <Route path="/relatorios" element={<Relatorios {...props} />} />
           <Route path="/relatorio-gerencial" element={<RelatorioGerencial {...props} />} />
+          <Route path="/regime-caixa" element={<RegimeCaixa {...props} />} />
           <Route path="/fluxo-caixa" element={<FluxoCaixa {...props} />} />
           <Route path="/contas" element={<Contas {...props} />} />
           <Route path="/impostos" element={<Impostos {...props} />} />

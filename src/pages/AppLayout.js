@@ -10,6 +10,7 @@ import { Tomadores } from './Tomadores'
 import { Adiantamentos } from './Adiantamentos'
 import { Cashback } from './Cashback'
 import { Comprovante } from './Comprovante'
+import { Comprovantes } from './Comprovantes'
 import { Relatorios } from './Relatorios'
 import { RelatorioGerencial } from './RelatorioGerencial'
 import { FluxoCaixa } from './FluxoCaixa'
@@ -83,7 +84,7 @@ export function AppLayout() {
           <Route path="/tomadores" element={<Tomadores {...props} />} />
           <Route path="/adiantamentos" element={<Adiantamentos {...props} />} />
           <Route path="/cashback" element={<Cashback {...props} />} />
-          <Route path="/comprovantes" element={<Comprovante {...props} />} />
+          <Route path="/comprovantes" element={<Comprovantes {...props} />} />
           <Route path="/relatorios" element={<Relatorios {...props} />} />
           <Route path="/relatorio-gerencial" element={<RelatorioGerencial {...props} />} />
           <Route path="/fluxo-caixa" element={<FluxoCaixa {...props} />} />

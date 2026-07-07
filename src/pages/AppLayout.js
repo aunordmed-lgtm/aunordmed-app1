@@ -19,6 +19,10 @@ import { Impostos } from './Impostos'
 import { DRE } from './DRE'
 import { Configuracoes } from './Configuracoes'
 import { ImportacaoNF } from './ImportacaoNF'
+import { RegimeCaixa } from './RegimeCaixa'
+import { Repasses } from './Repasses'
+import { ConferenciaPDF } from './ConferenciaPDF'
+import { ExtratoOFX } from './ExtratoOFX'
 
 async function safeQueryCustom(fn) {
   try {
@@ -87,19 +91,17 @@ export function AppLayout() {
           <Route path="/comprovantes" element={<Comprovantes {...props} />} />
           <Route path="/relatorios" element={<Relatorios {...props} />} />
           <Route path="/relatorio-gerencial" element={<RelatorioGerencial {...props} />} />
+          <Route path="/regime-caixa" element={<RegimeCaixa {...props} />} />
           <Route path="/fluxo-caixa" element={<FluxoCaixa {...props} />} />
           <Route path="/contas" element={<Contas {...props} />} />
           <Route path="/impostos" element={<Impostos {...props} />} />
           <Route path="/dre" element={<DRE {...props} />} />
           <Route path="/configuracoes" element={<Configuracoes {...props} />} />
-                  <Route path="/repasses" element={<Repasses {...props} />} />
-                    <Route path="/extrato" element={<ExtratoOFX {...props} />} />
-                    <Route path="/conferencia-pdf" element={<ConferenciaPDF {...props} />} />
-          </Routes>
+          <Route path="/repasses" element={<Repasses {...props} />} />
+          <Route path="/extrato" element={<ExtratoOFX {...props} />} />
+          <Route path="/conferencia-pdf" element={<ConferenciaPDF {...props} />} />
+        </Routes>
       </div>
     </div>
   )
 }
-import { Repasses } from './Repasses'
-import { ConferenciaPDF } from './ConferenciaPDF'
-import { ExtratoOFX } from './ExtratoOFX'

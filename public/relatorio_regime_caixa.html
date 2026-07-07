@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AunordMED — Regime de Caixa por Médico</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+:root{
+  --g1:#0D3D20;--g2:#145C30;--g3:#1A7A3E;--g4:#22994D;--g5:#3DB368;--g6:#A8DCBA;--g7:#E8F5ED;
+  --gray0:#0F172A;--gray1:#1E293B;--gray2:#475569;--gray3:#94A3B8;--gray4:#CBD5E1;--gray5:#E2E8F0;--gray6:#F1F5F9;
+  --red:#DC2626;--red-l:#FEF2F2;--orange:#D97706;--orange-l:#FFFBEB;
+  --surface:#fff;--bg:#F0F4F2;--border:#D4E6DA;
+  --radius:10px;--radius-lg:14px;--radius-xl:20px;
+  --mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;
+  --sh:0 1px 3px rgba(0,0,0,.06);--sh-md:0 8px 24px rgba(0,0,0,.1);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);background:var(--bg);color:var(--gray0);min-height:100vh;padding:24px 16px}
+.wrapper{max-width:1180px;margin:0 auto}
+
+.lov{position:fixed;inset:0;background:#fff;z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-size:14px;color:var(--gray2)}
+.lov.hide{display:none}
+.spin-big{width:36px;height:36px;border:3px solid var(--g6);border-top-color:var(--g4);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.header-card{background:linear-gradient(135deg,var(--g1) 0%,var(--g3) 100%);border-radius:var(--radius-xl);padding:26px 30px;margin-bottom:16px;position:relative;overflow:hidden}
+.header-card::before{content:'';position:absolute;top:-60px;right:-60px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.05)}
+.hc-top{position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:16px}
+.logo-name{font-size:22px;font-weight:700;color:#fff;letter-spacing:-.3px}
+.logo-name span{color:var(--g5)}
+.logo-sub{font-size:10px;color:rgba(255,255,255,.5);letter-spacing:.6px;margin-top:2px}
+.hc-title{font-size:16px;font-weight:600;color:#fff;margin-top:14px}
+.hc-desc{font-size:12px;color:rgba(255,255,255,.55);margin-top:4px;max-width:560px;line-height:1.5}
+
+.filtros-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xl);padding:18px 22px;margin-bottom:16px;box-shadow:var(--sh);display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
+.fld{display:flex;flex-direction:column;gap:5px}
+.fld label{font-size:10px;font-weight:700;color:var(--gray2);text-transform:uppercase;letter-spacing:.4px}
+input,select{border:1.5px solid var(--gray5);border-radius:var(--radius);padding:0 12px;font-family:var(--sans);font-size:13px;color:var(--gray0);background:var(--gray6);height:38px}
+input:focus,select:focus{outline:none;border-color:var(--g4);background:#fff;box-shadow:0 0 0 3px rgba(34,153,77,.1)}
+.btn{cursor:pointer;border:none;border-radius:var(--radius);font-family:var(--sans);font-size:13px;font-weight:600;padding:0 18px;height:38px;transition:all .15s;display:inline-flex;align-items:center;gap:7px}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--g3);color:#fff}.btn-primary:hover{background:var(--g2)}
+.btn-ghost{background:var(--gray6);color:var(--gray1);border:1px solid var(--border)}.btn-ghost:hover{background:var(--gray5)}
+.spacer{flex:1;min-width:8px}
+
+/* KPIs */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;box-shadow:var(--sh)}
+.kpi-lbl{font-size:10px;font-weight:700;color:var(--gray3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+.kpi-val{font-size:22px;font-weight:700;font-family:var(--mono);color:var(--gray0)}
+.kpi-val.pos{color:var(--g2)}
+.kpi-val.neg{color:var(--red)}
+.kpi-sub{font-size:11px;color:var(--gray3);margin-top:4px}
+
+/* TABELA */
+.table-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;box-shadow:var(--sh)}
+.table-hd{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.table-hd h3{font-size:13px;font-weight:600;color:var(--gray0)}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}
+thead tr{background:var(--g1)}
+th{padding:10px 16px;text-align:left;font-size:9px;font-weight:700;color:var(--g6);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{background:var(--g2)}
+th .arrow{opacity:.5;margin-left:3px}
+td{padding:11px 16px;border-bottom:1px solid var(--gray6);vertical-align:middle;white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--g7)}
+.mono{font-family:var(--mono)}
+.medico-cell{font-weight:600;color:var(--gray1);white-space:normal;min-width:220px}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:99px;font-size:10.5px;font-weight:700}
+.b-ok{background:var(--g7);color:var(--g2);border:1px solid var(--g6)}
+.b-warn{background:var(--orange-l);color:var(--orange);border:1px solid #FDE68A}
+.b-err{background:var(--red-l);color:var(--red);border:1px solid #FECACA}
+.diff-pos{color:var(--g2);font-weight:700}
+.diff-neg{color:var(--red);font-weight:700}
+.diff-zero{color:var(--gray3)}
+.empty-state{text-align:center;padding:60px 20px;color:var(--gray3)}
+.empty-state .ic{font-size:40px;margin-bottom:12px}
+
+.footer{text-align:center;padding:20px;font-size:11px;color:var(--gray3)}
+.footer strong{color:var(--gray2)}
+
+@media(max-width:760px){
+  .kpi-grid{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="lov" id="lov"><div class="spin-big"></div><span>Carregando dados...</span></div>
+
+<div class="wrapper" id="wrapper" style="display:none">
+
+  <div class="header-card">
+    <div class="hc-top">
+      <div>
+        <div class="logo-name">Aunord<span>MED</span></div>
+        <div class="logo-sub">FINANCEIRO</div>
+        <div class="hc-title">📊 Regime de Caixa por Médico</div>
+        <div class="hc-desc">Compara quanto foi efetivamente pago (comprovantes com data de pagamento) versus quanto era devido pelas notas fiscais lançadas até a data de corte — útil para conferir se o sistema está alimentado corretamente contra o extrato bancário.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="filtros-card">
+    <div class="fld">
+      <label>Data de corte</label>
+      <input type="date" id="f-data-corte">
+    </div>
+    <div class="fld">
+      <label>Buscar médico</label>
+      <input type="text" id="f-busca" placeholder="Nome do médico..." style="width:220px">
+    </div>
+    <div class="fld">
+      <label>Mostrar</label>
+      <select id="f-status">
+        <option value="todos">Todos</option>
+        <option value="divergentes">Só com diferença</option>
+        <option value="ok">Só sem diferença</option>
+      </select>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn btn-ghost" onclick="exportarExcel()">📥 Exportar Excel</button>
+    <button class="btn btn-primary" onclick="carregarDados()">🔄 Atualizar</button>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-lbl">Total pago (caixa)</div>
+      <div class="kpi-val" id="kpi-caixa">R$ 0,00</div>
+      <div class="kpi-sub" id="kpi-caixa-sub">até a data de corte</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Total devido (competência)</div>
+      <div class="kpi-val" id="kpi-comp">R$ 0,00</div>
+      <div class="kpi-sub">notas fiscais no período</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Diferença total</div>
+      <div class="kpi-val" id="kpi-dif">R$ 0,00</div>
+      <div class="kpi-sub">caixa − competência</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Médicos com divergência</div>
+      <div class="kpi-val" id="kpi-div-count">0</div>
+      <div class="kpi-sub" id="kpi-div-sub">de 0 médicos no total</div>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <div class="table-hd">
+      <h3 id="table-title">Comparativo por médico</h3>
+      <span style="font-size:11px;color:var(--gray3)" id="table-count"></span>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-k="medico">Médico <span class="arrow">↕</span></th>
+            <th data-k="qtd" style="text-align:center">Nº comprovantes</th>
+            <th data-k="caixa" style="text-align:right">Pago (caixa)</th>
+            <th data-k="comp" style="text-align:right">Devido (competência)</th>
+            <th data-k="dif" style="text-align:right">Diferença <span class="arrow">↕</span></th>
+            <th data-k="ultimo" style="text-align:right">Último pagamento</th>
+            <th style="text-align:center">Status</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="footer">Gerado por <strong>AunordMED Financeiro</strong> · <span id="footer-data"></span></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+const SUPA_URL='https://hleesgnzpkjuhjshyaal.supabase.co';
+const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhsZWVzZ256cGtqdWhqc2h5YWFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzODczMTksImV4cCI6MjA5Nzk2MzMxOX0.jnVO9Bqo-s5DPK0-tFeYr_UeBaEkXCmVa2xhA93aVDk';
+const H={'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Prefer':'return=representation'};
+async function sGet(t,q=''){const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${q}`,{headers:H});if(!r.ok)throw new Error(await r.text());return r.json();}
+
+let linhas=[];
+let sortKey='dif', sortDir='desc';
+
+const brl=v=>Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtDt=d=>{if(!d)return'—';const p=d.split('T')[0].split('-');return`${p[2]}/${p[1]}/${p[0]}`;};
+
+function hojeISO(){return new Date().toISOString().split('T')[0];}
+
+async function carregarDados(){
+  document.getElementById('lov').classList.remove('hide');
+  document.getElementById('wrapper').style.display='none';
+  try{
+    const dataCorte=document.getElementById('f-data-corte').value||hojeISO();
+    const compYYYYMM=dataCorte.slice(0,7);
+
+    // Comprovantes = regime de caixa (o que realmente saiu do banco até a data de corte)
+    const comprovantes=await sGet('comprovantes',`data_pagamento=lte.${dataCorte}&order=medico_nome`).catch(()=>[]);
+
+    // Notas fiscais = regime de competência (o que era devido pelas notas lançadas até o mês de corte)
+    const notas=await sGet('notas_fiscais','order=criado_em.asc').catch(()=>[]);
+
+    const porMedico={};
+
+    comprovantes.forEach(c=>{
+      const nome=c.medico_nome;
+      if(!nome)return;
+      if(!porMedico[nome])porMedico[nome]={medico:nome,qtd:0,caixa:0,comp:0,ultimo:null};
+      porMedico[nome].qtd++;
+      porMedico[nome].caixa+=c.valor_repasse||0;
+      if(!porMedico[nome].ultimo||c.data_pagamento>porMedico[nome].ultimo)porMedico[nome].ultimo=c.data_pagamento;
+    });
+
+    notas.forEach(n=>{
+      if(!n.comp||n.comp>compYYYYMM)return; // ignora competências posteriores à data de corte
+      (n.medicos_nota||[]).forEach(mn=>{
+        const nome=mn.nome;
+        if(!nome)return;
+        if(!porMedico[nome])porMedico[nome]={medico:nome,qtd:0,caixa:0,comp:0,ultimo:null};
+        porMedico[nome].comp+=mn.repasse||0;
+      });
+    });
+
+    linhas=Object.values(porMedico).map(l=>({...l,dif:l.caixa-l.comp}));
+
+    document.getElementById('footer-data').textContent=new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
+    renderTudo();
+  }catch(e){
+    document.getElementById('tbody').innerHTML=`<tr><td colspan="7"><div class="empty-state"><div class="ic">❌</div>Erro ao carregar: ${e.message}</div></td></tr>`;
+  }finally{
+    document.getElementById('lov').classList.add('hide');
+    document.getElementById('wrapper').style.display='block';
+  }
+}
+
+function linhasFiltradas(){
+  const busca=(document.getElementById('f-busca').value||'').toLowerCase();
+  const status=document.getElementById('f-status').value;
+  let f=linhas.filter(l=>l.medico.toLowerCase().includes(busca));
+  if(status==='divergentes')f=f.filter(l=>Math.abs(l.dif)>0.01);
+  if(status==='ok')f=f.filter(l=>Math.abs(l.dif)<=0.01);
+  f.sort((a,b)=>{
+    let va=a[sortKey],vb=b[sortKey];
+    if(sortKey==='medico')return sortDir==='asc'?va.localeCompare(vb):vb.localeCompare(va);
+    if(sortKey==='dif'){va=Math.abs(va);vb=Math.abs(vb);}
+    return sortDir==='asc'?va-vb:vb-va;
+  });
+  return f;
+}
+
+function renderTudo(){
+  const f=linhasFiltradas();
+  const totalCaixa=linhas.reduce((a,l)=>a+l.caixa,0);
+  const totalComp=linhas.reduce((a,l)=>a+l.comp,0);
+  const totalDif=totalCaixa-totalComp;
+  const divergentes=linhas.filter(l=>Math.abs(l.dif)>0.01).length;
+
+  document.getElementById('kpi-caixa').textContent='R$ '+brl(totalCaixa);
+  document.getElementById('kpi-comp').textContent='R$ '+brl(totalComp);
+  const kd=document.getElementById('kpi-dif');
+  kd.textContent=(totalDif>=0?'R$ ':'-R$ ')+brl(Math.abs(totalDif));
+  kd.className='kpi-val '+(totalDif>0.01?'pos':totalDif<-0.01?'neg':'');
+  document.getElementById('kpi-div-count').textContent=divergentes;
+  document.getElementById('kpi-div-sub').textContent=`de ${linhas.length} médicos no total`;
+  document.getElementById('table-count').textContent=`${f.length} médico(s)`;
+
+  const tbody=document.getElementById('tbody');
+  if(!f.length){
+    tbody.innerHTML=`<tr><td colspan="7"><div class="empty-state"><div class="ic">🔍</div>Nenhum médico encontrado com esse filtro.</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML=f.map(l=>{
+    const difClass=l.dif>0.01?'diff-pos':l.dif<-0.01?'diff-neg':'diff-zero';
+    const difLabel=(l.dif>=0?'+':'-')+'R$ '+brl(Math.abs(l.dif));
+    let badge;
+    if(Math.abs(l.dif)<=0.01)badge=`<span class="badge b-ok">✓ OK</span>`;
+    else if(l.dif>0)badge=`<span class="badge b-warn">Pago a mais</span>`;
+    else badge=`<span class="badge b-err">Faltando lançar</span>`;
+    return `<tr>
+      <td class="medico-cell">${l.medico}</td>
+      <td style="text-align:center" class="mono">${l.qtd}</td>
+      <td style="text-align:right" class="mono">R$ ${brl(l.caixa)}</td>
+      <td style="text-align:right" class="mono">R$ ${brl(l.comp)}</td>
+      <td style="text-align:right" class="mono ${difClass}">${difLabel}</td>
+      <td style="text-align:right" class="mono">${fmtDt(l.ultimo)}</td>
+      <td style="text-align:center">${badge}</td>
+    </tr>`;
+  }).join('');
+}
+
+document.querySelectorAll('th[data-k]').forEach(th=>{
+  th.addEventListener('click',()=>{
+    const k=th.dataset.k;
+    if(sortKey===k)sortDir=sortDir==='asc'?'desc':'asc';
+    else{sortKey=k;sortDir='desc';}
+    renderTudo();
+  });
+});
+document.getElementById('f-busca').addEventListener('input',renderTudo);
+document.getElementById('f-status').addEventListener('change',renderTudo);
+
+function exportarExcel(){
+  const f=linhasFiltradas();
+  const rows=f.map(l=>({
+    'Médico':l.medico,
+    'Nº Comprovantes':l.qtd,
+    'Pago (Caixa) R$':Number(l.caixa.toFixed(2)),
+    'Devido (Competência) R$':Number(l.comp.toFixed(2)),
+    'Diferença R$':Number(l.dif.toFixed(2)),
+    'Último Pagamento':fmtDt(l.ultimo),
+    'Status':Math.abs(l.dif)<=0.01?'OK':(l.dif>0?'Pago a mais':'Faltando lançar')
+  }));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Regime de Caixa');
+  const dataCorte=document.getElementById('f-data-corte').value||hojeISO();
+  XLSX.writeFile(wb,`regime_caixa_${dataCorte}.xlsx`);
+}
+
+document.getElementById('f-data-corte').value=hojeISO();
+carregarDados();
+</script>
+</body>
+</html>

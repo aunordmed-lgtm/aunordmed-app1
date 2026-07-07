@@ -28,6 +28,7 @@ const navItems = [
   { path: '/relatorio-gerencial', icon: '📋', label: 'Gerencial' },
   { path: '/comprovantes', icon: '🧾', label: 'Comprovantes', badge: 'comp', badgeColor: 'ok' },
   { path: '/relatorios', icon: '📈', label: 'Por médico' },
+  { path: '/regime-caixa', icon: '💳', label: 'Regime de caixa' },
   { section: 'Sistema' },
   { path: '/configuracoes', icon: '⚙️', label: 'Configurações' },
 ]

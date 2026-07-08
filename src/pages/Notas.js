@@ -39,6 +39,9 @@ export function Notas({ notas, medicos, onRefresh }) {
   const [busca, setBusca] = useState('')
   const [fltStatus, setFltStatus] = useState('')
   const [fltComp, setFltComp] = useState('')
+  const [fltTomador, setFltTomador] = useState('')
+  const [sortKey, setSortKey] = useState('criado_em')
+  const [sortDir, setSortDir] = useState('desc')
   const [medSel, setMedSel] = useState([])
   const [form, setForm] = useState({ nf: '', tomador: '', comp: '', emissao: '', status: 'Emitida', obs: '', bruto: '' })
   // Importação Excel médicos
@@ -54,12 +57,41 @@ export function Notas({ notas, medicos, onRefresh }) {
 
   const medicosOrdenados = useMemo(() => [...medicos].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')), [medicos])
   const comps = useMemo(() => [...new Set(notas.map(n => n.comp).filter(Boolean))].sort(), [notas])
+  const tomadoresLista = useMemo(() => [...new Set(notas.map(n => n.tomador).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), [notas])
 
-  const filtradas = useMemo(() => notas.filter(n =>
-    (!busca || n.nf?.toLowerCase().includes(busca.toLowerCase()) || n.tomador?.toLowerCase().includes(busca.toLowerCase())) &&
-    (!fltStatus || n.status === fltStatus) &&
-    (!fltComp || n.comp === fltComp)
-  ), [notas, busca, fltStatus, fltComp])
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('asc') }
+  }
+  function sortArrow(key) {
+    if (sortKey !== key) return ''
+    return sortDir === 'asc' ? ' ▲' : ' ▼'
+  }
+
+  const filtradas = useMemo(() => {
+    let f = notas.filter(n =>
+      (!busca || n.nf?.toLowerCase().includes(busca.toLowerCase()) || n.tomador?.toLowerCase().includes(busca.toLowerCase())) &&
+      (!fltStatus || n.status === fltStatus) &&
+      (!fltComp || n.comp === fltComp) &&
+      (!fltTomador || n.tomador === fltTomador)
+    )
+    f = [...f].sort((a, b) => {
+      let va = a[sortKey], vb = b[sortKey]
+      if (sortKey === 'nf') {
+        // ordena numericamente quando possível (NFs são strings de números)
+        const na = parseFloat(String(va || '').replace(/\D/g, '')) || 0
+        const nb = parseFloat(String(vb || '').replace(/\D/g, '')) || 0
+        return sortDir === 'asc' ? na - nb : nb - na
+      }
+      if (typeof va === 'string' || typeof vb === 'string') {
+        va = va || ''; vb = vb || ''
+        return sortDir === 'asc' ? va.localeCompare(vb, 'pt-BR') : vb.localeCompare(va, 'pt-BR')
+      }
+      va = va || 0; vb = vb || 0
+      return sortDir === 'asc' ? va - vb : vb - va
+    })
+    return f
+  }, [notas, busca, fltStatus, fltComp, fltTomador, sortKey, sortDir])
 
   const notasRel = useMemo(() => {
     if (relTipo === 'todos') return notas
@@ -121,7 +153,11 @@ export function Notas({ notas, medicos, onRefresh }) {
     if (medSel.find(m => m.nome === nome)) { toast('Médico já adicionado.', 'error'); return }
     const med = medicos.find(m => m.nome === nome)
     if (!med) return
-    setMedSel(prev => [...prev, { nome, crm: med?.crm || '', ret: med?.retencao || 13, valor: '' }])
+    const brutoTotal = parseFloat(form.bruto) || 0
+    const jaAlocado = medSel.reduce((a, m) => a + (parseFloat(m.valor) || 0), 0)
+    const restante = brutoTotal - jaAlocado
+    const valorSugerido = restante > 0 ? restante.toFixed(2) : ''
+    setMedSel(prev => [...prev, { nome, crm: med?.crm || '', ret: med?.retencao || 13, valor: valorSugerido }])
   }
 
   // Importação Excel médicos
@@ -355,12 +391,25 @@ export function Notas({ notas, medicos, onRefresh }) {
               <option value="">Competências</option>
               {comps.map(c => <option key={c} value={c}>{fmtMes(c)}</option>)}
             </select>
+            <select className="filter-select" value={fltTomador} onChange={e => setFltTomador(e.target.value)}>
+              <option value="">Todos tomadores</option>
+              {tomadoresLista.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
           <div className="table-wrap">
             <table>
               <thead><tr>
-                <th>#</th><th>Nº NF</th><th>Tomador</th><th>Médicos</th><th>Competência</th>
-                <th>Bruto</th><th>Recebido</th><th>Repasse</th><th>Margem</th><th>Status</th><th>Ações</th>
+                <th>#</th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('nf')}>Nº NF{sortArrow('nf')}</th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('tomador')}>Tomador{sortArrow('tomador')}</th>
+                <th>Médicos</th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('comp')}>Competência{sortArrow('comp')}</th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('bruto')}>Bruto{sortArrow('bruto')}</th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('recebido')}>Recebido{sortArrow('recebido')}</th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('total_repasse')}>Repasse{sortArrow('total_repasse')}</th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('margem')}>Margem{sortArrow('margem')}</th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('status')}>Status{sortArrow('status')}</th>
+                <th>Ações</th>
               </tr></thead>
               <tbody>
                 {filtradas.length === 0 ? (

@@ -6,10 +6,18 @@ import { brl, pct, fmtMes, uid } from '../lib/helpers'
 import * as XLSX from 'xlsx'
 
 const IMPOSTOS = 0.0615
+const ALIQ_IR = 0.015
+const ALIQ_CSLL = 0.01
+const ALIQ_PIS = 0.0065
+const ALIQ_COFINS = 0.03
 
 function calcNota(bruto, medsSel) {
   const b = parseFloat(bruto) || 0
   const recebido = b * (1 - IMPOSTOS)
+  const ir = b * ALIQ_IR
+  const csll = b * ALIQ_CSLL
+  const pis = b * ALIQ_PIS
+  const cofins = b * ALIQ_COFINS
   let totalRepasse = 0
   const meds = medsSel.map(ms => {
     const ret = parseFloat(ms.ret) / 100
@@ -18,7 +26,7 @@ function calcNota(bruto, medsSel) {
     return { ...ms, repasse }
   })
   const margem = recebido - totalRepasse
-  return { bruto: b, recebido, totalRepasse, margem, pct_margem: recebido > 0 ? margem / recebido : 0, meds }
+  return { bruto: b, recebido, totalRepasse, margem, pct_margem: recebido > 0 ? margem / recebido : 0, meds, ir, csll, pis, cofins }
 }
 
 export function Notas({ notas, medicos, onRefresh }) {
@@ -219,7 +227,12 @@ export function Notas({ notas, medicos, onRefresh }) {
       retencao_individual: parseFloat(ms.ret) || 13,
       repasse: parseFloat(ms.valor || 0) * (1 - parseFloat(ms.ret || 13) / 100)
     })) : []
-    const payload = { ...form, bruto: calc.bruto, recebido: calc.recebido, total_repasse: calc.totalRepasse, margem: calc.margem, pct_margem: calc.pct_margem, medicos_nota: medicos_nota.length ? medicos_nota : null, nomes_medicos: medSel.map(m => m.nome).join(', ') || null }
+    const payload = {
+      ...form, bruto: calc.bruto, recebido: calc.recebido, total_repasse: calc.totalRepasse,
+      margem: calc.margem, pct_margem: calc.pct_margem,
+      ir: calc.ir, csll: calc.csll, pis: calc.pis, cofins: calc.cofins,
+      medicos_nota: medicos_nota.length ? medicos_nota : null, nomes_medicos: medSel.map(m => m.nome).join(', ') || null
+    }
     setLoading(true)
     try {
       if (editando) {
@@ -606,6 +619,18 @@ export function Notas({ notas, medicos, onRefresh }) {
               <div className="computed-box"><div className="computed-label">Total repasse</div><div className="computed-value">{brl(v.totalRepasse)}</div></div>
               <div className="computed-box highlight"><div className="computed-label">Margem empresa</div><div className="computed-value">{brl(v.margem)}</div></div>
               <div className="computed-box"><div className="computed-label">% Margem</div><div className="computed-value">{pct(v.pct_margem)}</div></div>
+            </div>
+
+            <div style={{ marginTop:10 }}>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--n4)', textTransform:'uppercase', letterSpacing:.4, marginBottom:6 }}>
+                Retenções federais (detalhamento dos 6,15%)
+              </div>
+              <div className="computed-row">
+                <div className="computed-box"><div className="computed-label">IR (1,5%)</div><div className="computed-value">{brl(v.ir)}</div></div>
+                <div className="computed-box"><div className="computed-label">CSLL (1%)</div><div className="computed-value">{brl(v.csll)}</div></div>
+                <div className="computed-box"><div className="computed-label">PIS (0,65%)</div><div className="computed-value">{brl(v.pis)}</div></div>
+                <div className="computed-box"><div className="computed-label">COFINS (3%)</div><div className="computed-value">{brl(v.cofins)}</div></div>
+              </div>
             </div>
           </>
         )}

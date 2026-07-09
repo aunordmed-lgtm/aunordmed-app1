@@ -272,10 +272,12 @@ export function Notas({ notas, medicos, onRefresh }) {
     setLoading(true)
     try {
       if (editando) {
-        await supabase.from('notas_fiscais').update(payload).eq('id', editando.id)
+        const { error } = await supabase.from('notas_fiscais').update(payload).eq('id', editando.id)
+        if (error) throw error
         toast('Nota atualizada!')
       } else {
-        const { data: nova } = await supabase.from('notas_fiscais').insert(payload).select().single()
+        const { data: nova, error } = await supabase.from('notas_fiscais').insert(payload).select().single()
+        if (error) throw error
         for (const ms of medSel) {
           const med = medicos.find(m => m.nome === ms.nome)
           const repMed = parseFloat(ms.valor || 0) * (1 - parseFloat(ms.ret || 13) / 100)
@@ -285,7 +287,7 @@ export function Notas({ notas, medicos, onRefresh }) {
       }
       setModalOpen(false)
       onRefresh()
-    } catch(e) { toast('Erro: ' + e.message, 'error') }
+    } catch(e) { toast('Erro ao salvar: ' + e.message, 'error') }
     setLoading(false)
   }
 

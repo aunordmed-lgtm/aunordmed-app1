@@ -23,6 +23,7 @@ import { RegimeCaixa } from './RegimeCaixa'
 import { Repasses } from './Repasses'
 import { ConferenciaPDF } from './ConferenciaPDF'
 import { ExtratoOFX } from './ExtratoOFX'
+import { Solicitacoes } from './Solicitacoes'
 
 async function safeQueryCustom(fn) {
   try {
@@ -35,12 +36,12 @@ async function safeQueryCustom(fn) {
 export function AppLayout() {
   const [data, setData] = useState({
     notas: [], medicos: [], tomadores: [], adiantamentos: [],
-    cashbacks: [], comprovantes: [], contas: [], impostos: []
+    cashbacks: [], comprovantes: [], contas: [], impostos: [], solicitacoes: []
   })
   const [loading, setLoading] = useState(true)
 
   const carregar = useCallback(async () => {
-    const [notas, medicos, tomadores, adiantamentos, cashbacks, comprovantes, contas, impostos] = await Promise.all([
+    const [notas, medicos, tomadores, adiantamentos, cashbacks, comprovantes, contas, impostos, solicitacoes] = await Promise.all([
       safeQueryCustom(() => supabase.from('notas_fiscais').select('*').order('criado_em', { ascending: false })),
       safeQueryCustom(() => supabase.from('medicos').select('*').order('nome')),
       safeQueryCustom(() => supabase.from('tomadores').select('*').order('nome')),
@@ -49,8 +50,9 @@ export function AppLayout() {
       safeQueryCustom(() => supabase.from('comprovantes').select('*').order('criado_em', { ascending: false })),
       safeQueryCustom(() => supabase.from('contas_pagar_receber').select('*').order('vencimento')),
       safeQueryCustom(() => supabase.from('impostos').select('*').order('competencia', { ascending: false })),
+      safeQueryCustom(() => supabase.from('solicitacoes_medicos').select('*').order('criado_em', { ascending: false })),
     ])
-    setData({ notas, medicos, tomadores, adiantamentos, cashbacks, comprovantes, contas, impostos })
+    setData({ notas, medicos, tomadores, adiantamentos, cashbacks, comprovantes, contas, impostos, solicitacoes })
     setLoading(false)
   }, [])
 
@@ -64,6 +66,7 @@ export function AppLayout() {
     adt: data.adiantamentos.filter(a => a.status === 'pendente').length,
     cb: data.cashbacks.filter(c => c.status === 'pendente').length,
     contas: data.contas.filter(c => c.status === 'pendente').length,
+    solic: data.solicitacoes.filter(s => s.status === 'Pendente').length,
   }
 
   if (loading) return (
@@ -83,6 +86,7 @@ export function AppLayout() {
           <Route path="/" element={<Dashboard {...props} />} />
           <Route path="/notas" element={<Notas {...props} />} />
           <Route path="/importacao" element={<ImportacaoNF {...props} />} />
+          <Route path="/solicitacoes" element={<Solicitacoes {...props} />} />
           <Route path="/pendencias" element={<Pendencias {...props} />} />
           <Route path="/medicos" element={<Medicos {...props} />} />
           <Route path="/tomadores" element={<Tomadores {...props} />} />

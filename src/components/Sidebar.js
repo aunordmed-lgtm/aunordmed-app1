@@ -11,6 +11,7 @@ const navItems = [
   { path: '/extrato', icon: '🏦', label: 'Extrato OFX' },
   { path: '/conferencia-pdf', icon: '📋', label: 'Conferência PDF' },
   { section: 'Pendências' },
+  { path: '/solicitacoes', icon: '📨', label: 'Solicitações', badge: 'solic', badgeColor: 'orange' },
   { path: '/pendencias', icon: '🔔', label: 'Pendências', badge: 'pend' },
   { section: 'Financeiro' },
   { path: '/fluxo-caixa', icon: '💰', label: 'Fluxo de caixa' },

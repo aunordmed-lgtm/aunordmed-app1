@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
@@ -54,6 +54,24 @@ export function Notas({ notas, medicos, onRefresh }) {
   const [relMes, setRelMes] = useState(new Date().toISOString().substring(0, 7))
   const [relDe, setRelDe] = useState('')
   const [relAte, setRelAte] = useState('')
+  const [prefillIds, setPrefillIds] = useState([])
+
+  useEffect(() => {
+    const raw = localStorage.getItem('aunordmed_prefill_nota')
+    if (!raw) return
+    try {
+      const p = JSON.parse(raw)
+      setEditando(null)
+      setForm({ nf: '', tomador: p.tomador || '', comp: p.comp || '', emissao: '', status: 'Emitida', obs: '', bruto: '' })
+      setMedSel((p.medicos || []).map(m => ({ nome: m.nome, crm: '', ret: 13, valor: m.valor || '' })))
+      setPrefillIds(p.solicitacaoIds || [])
+      setAbaModal('dados')
+      setImportPreview([])
+      setImportErro('')
+      setModalOpen(true)
+    } catch {}
+    localStorage.removeItem('aunordmed_prefill_nota')
+  }, [])
 
   const medicosOrdenados = useMemo(() => [...medicos].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')), [medicos])
   const comps = useMemo(() => [...new Set(notas.map(n => n.comp).filter(Boolean))].sort(), [notas])
@@ -282,6 +300,10 @@ export function Notas({ notas, medicos, onRefresh }) {
           const med = medicos.find(m => m.nome === ms.nome)
           const repMed = parseFloat(ms.valor || 0) * (1 - parseFloat(ms.ret || 13) / 100)
           await supabase.from('comprovantes').insert({ token: uid(), nf_id: nova?.id, medico_nome: ms.nome, medico_crm: med?.crm || null, tomador: form.tomador, valor_repasse: repMed, competencia: form.comp || null, dados_extras: { nf: form.nf, pix: med?.chave_pix } }).catch(() => {})
+        }
+        if (prefillIds.length) {
+          await supabase.from('solicitacoes_medicos').update({ status: 'Nota emitida', nota_fiscal_id: nova?.id }).in('id', prefillIds).catch(() => {})
+          setPrefillIds([])
         }
         toast('Nota adicionada!')
       }

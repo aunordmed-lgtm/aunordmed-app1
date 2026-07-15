@@ -81,14 +81,24 @@ export function Comprovantes({ comprovantes=[], medicos, notas=[], onRefresh }) 
     return idx>=0?idx+1:1
   }
 
+  const montarMensagem = (c) => {
+    const link = `${baseUrl}?token=${c.token}`
+    const num = pad(getNumSeq(c))
+    return `🏥 *AunordMED Financeiro*\nOlá, Dr(a). *${c.medico_nome}*!\nSeu comprovante de repasse *#${num}* está disponível.\n💰 *Valor:* ${brl(c.valor_repasse)}\n📅 *Data:* ${fmtData(c.data_pagamento)}\n🏢 *Tomador:* ${c.tomador||'—'}\n📅 *Competência:* ${fmtMes(c.competencia)}\n📄 Acesse:\n${link}\n_AunordMED — Gestão financeira médica_`
+  }
+
   const abrirWpp = (c) => {
     const link = `${baseUrl}?token=${c.token}`
     const med = medicos.find(m=>m.nome===c.medico_nome)
     const tel = med?.telefone_whatsapp||''
-    const num = pad(getNumSeq(c))
-    const msg = `🏥 *AunordMED Financeiro*\n\nOlá, Dr(a). *${c.medico_nome}*!\n\nSeu comprovante de repasse *#${num}* está disponível.\n\n💰 *Valor:* ${brl(c.valor_repasse)}\n📅 *Data:* ${fmtData(c.data_pagamento)}\n🏢 *Tomador:* ${c.tomador||'—'}\n📅 *Competência:* ${fmtMes(c.competencia)}\n\n📄 Acesse:\n${link}\n\n_AunordMED — Gestão financeira médica_`
+    const msg = montarMensagem(c)
     setWppData({ link, msg, tel })
     setModalWpp(true)
+  }
+
+  const copiarMensagem = (c) => {
+    const msg = montarMensagem(c)
+    navigator.clipboard.writeText(msg).then(()=>toast('Mensagem copiada!')).catch(()=>toast('Erro ao copiar.','error'))
   }
 
   const copiarLink = (token) => {
@@ -148,7 +158,8 @@ export function Comprovantes({ comprovantes=[], medicos, notas=[], onRefresh }) 
                     <td className="mono" style={{ fontWeight:700, color:'var(--g3)' }}>{brl(c.valor_repasse)}</td>
                     <td className="mono">{fmtData(c.data_pagamento)}</td>
                     <td style={{ display:'flex', gap:4, paddingTop:6 }}>
-                      <button className="btn btn-ghost btn-xs" onClick={()=>copiarLink(c.token)}>🔗 Copiar</button>
+                      <button className="btn btn-ghost btn-xs" onClick={()=>copiarMensagem(c)} title="Copia a mensagem completa (pronta para colar no WhatsApp)">💬 Copiar</button>
+                      <button className="btn btn-ghost btn-xs" onClick={()=>copiarLink(c.token)} title="Copia só o link">🔗</button>
                       <button className="btn btn-ghost btn-xs" onClick={()=>window.open(`${baseUrl}?token=${c.token}`,'_blank')}>↗</button>
                     </td>
                     <td><button className="btn btn-wpp btn-xs" onClick={()=>abrirWpp(c)}>💬 Enviar</button></td>

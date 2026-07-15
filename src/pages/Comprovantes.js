@@ -84,7 +84,8 @@ export function Comprovantes({ comprovantes=[], medicos, notas=[], onRefresh }) 
   const montarMensagem = (c) => {
     const link = `${baseUrl}?token=${c.token}`
     const num = pad(getNumSeq(c))
-    return `🏥 *AunordMED Financeiro*\nOlá, Dr(a). *${c.medico_nome}*!\nSeu comprovante de repasse *#${num}* está disponível.\n💰 *Valor:* ${brl(c.valor_repasse)}\n📅 *Data:* ${fmtData(c.data_pagamento)}\n🏢 *Tomador:* ${c.tomador||'—'}\n📅 *Competência:* ${fmtMes(c.competencia)}\n📄 Acesse:\n${link}\n_AunordMED — Gestão financeira médica_`
+    const dataPag = c.data_pagamento ? fmtData(c.data_pagamento) : fmtData(new Date().toISOString())
+    return `🏥 *AunordMED Financeiro*\nOlá, Dr(a). *${c.medico_nome}*!\nSeu comprovante de repasse *#${num}* está disponível.\n💰 *Valor:* ${brl(c.valor_repasse)}\n📅 *Data:* ${dataPag}\n🏢 *Tomador:* ${c.tomador||'—'}\n📅 *Competência:* ${fmtMes(c.competencia)}\n📄 Acesse:\n${link}\n_AunordMED — Gestão financeira médica_`
   }
 
   const abrirWpp = (c) => {
@@ -156,7 +157,7 @@ export function Comprovantes({ comprovantes=[], medicos, notas=[], onRefresh }) 
                     <td>{c.tomador||'—'}</td>
                     <td className="mono">{fmtMes(c.competencia)}</td>
                     <td className="mono" style={{ fontWeight:700, color:'var(--g3)' }}>{brl(c.valor_repasse)}</td>
-                    <td className="mono">{fmtData(c.data_pagamento)}</td>
+                    <td className="mono">{c.data_pagamento ? fmtData(c.data_pagamento) : fmtData(new Date().toISOString())}</td>
                     <td style={{ display:'flex', gap:4, paddingTop:6 }}>
                       <button className="btn btn-ghost btn-xs" onClick={()=>copiarMensagem(c)} title="Copia a mensagem completa (pronta para colar no WhatsApp)">💬 Copiar</button>
                       <button className="btn btn-ghost btn-xs" onClick={()=>copiarLink(c.token)} title="Copia só o link">🔗</button>
